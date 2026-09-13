@@ -175,32 +175,35 @@ func (a *app) showPrivateJoinModal(i *discordgo.InteractionCreate) {
 	}
 }
 func (a *app) create(i *discordgo.InteractionCreate, o map[string]string, visibility string) {
+	if !a.deferReply(i, true) {
+		return
+	}
 	if channel, err := a.eventChannel(context.Background(), i.GuildID); err != nil || channel == "" {
-		a.reply(i, "An administrator must first run `/sessions configure-channel`.", true)
+		a.editReply(i, "An administrator must first run `/sessions configure-channel`.")
 		return
 	}
 	timezone, err := a.eventTimezone(context.Background(), i.GuildID)
 	if err != nil {
-		a.reply(i, "An administrator must first run `/sessions configure-timezone`.", true)
+		a.editReply(i, "An administrator must first run `/sessions configure-timezone`.")
 		return
 	}
 	location, err := time.LoadLocation(timezone)
 	if err != nil {
-		a.fail(i, err)
+		a.failDeferred(i, err)
 		return
 	}
 	when, err := parseEventTime(o["when"], location)
 	if err != nil {
-		a.reply(i, "Try `tomorrow 8pm`, `Friday 19:30`, or `2026-09-13 20:43`.", true)
+		a.editReply(i, "Try `tomorrow 8pm`, `Friday 19:30`, or `2026-09-13 20:43`.")
 		return
 	}
 	if when.Before(time.Now()) {
-		a.reply(i, "The play-session time must be in the future.", true)
+		a.editReply(i, "The play-session time must be in the future.")
 		return
 	}
 	e, err := a.createEvent(context.Background(), event{GuildID: i.GuildID, CreatorID: userID(i), Title: o["title"], Visibility: visibility, GameServer: o["server"], Species: o["species"], StartsAt: when.UTC()})
 	if err != nil {
-		a.fail(i, err)
+		a.failDeferred(i, err)
 		return
 	}
 	if e.Visibility == "private" {
@@ -209,19 +212,19 @@ func (a *app) create(i *discordgo.InteractionCreate, o map[string]string, visibi
 			_, err = a.session.ChannelMessageSend(dm.ID, "Your private **"+e.Title+"** play session is ready. Share invite code `"+e.InviteCode+"`. Participants join with `/sessions join-private` and the code.")
 		}
 		if err != nil {
-			a.reply(i, "I could not DM you the private invite code. Enable DMs from server members and try again.", true)
+			a.editReply(i, "I could not DM you the private invite code. Enable DMs from server members and try again.")
 			return
 		}
-		a.reply(i, "I sent your private session invite code by DM.", true)
+		a.editReply(i, "I sent your private session invite code by DM.")
 		return
 	}
 	channel, _ := a.eventChannel(context.Background(), i.GuildID)
 	_, err = a.session.ChannelMessageSendComplex(channel, &discordgo.MessageSend{Content: eventText(e), Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.Button{Label: "Join session", Style: discordgo.PrimaryButton, CustomID: "join:" + e.ID}, discordgo.Button{Label: "Leave session", Style: discordgo.SecondaryButton, CustomID: "leave:" + e.ID}}}}})
 	if err != nil {
-		a.fail(i, err)
+		a.failDeferred(i, err)
 		return
 	}
-	a.reply(i, "Your public play session is live in the configured session channel.", true)
+	a.editReply(i, "Your public play session is live in the configured session channel.")
 }
 
 func parseEventTime(value string, location *time.Location) (time.Time, error) {
@@ -449,6 +452,26 @@ func (a *app) replyWithComponents(i *discordgo.InteractionCreate, text string, c
 	if err := a.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Content: text, Components: components, Flags: flags}}); err != nil {
 		slog.Error("respond to interaction", "error", err)
 	}
+}
+func (a *app) deferReply(i *discordgo.InteractionCreate, ephemeral bool) bool {
+	flags := discordgo.MessageFlags(0)
+	if ephemeral {
+		flags = discordgo.MessageFlagsEphemeral
+	}
+	if err := a.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseDeferredChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Flags: flags}}); err != nil {
+		slog.Error("defer interaction response", "error", err)
+		return false
+	}
+	return true
+}
+func (a *app) editReply(i *discordgo.InteractionCreate, content string) {
+	if _, err := a.session.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{Content: &content}); err != nil {
+		slog.Error("edit interaction response", "error", err)
+	}
+}
+func (a *app) failDeferred(i *discordgo.InteractionCreate, err error) {
+	slog.Error("interaction failed", "error", err)
+	a.editReply(i, "Something went wrong. Please try again.")
 }
 func (a *app) reply(i *discordgo.InteractionCreate, text string, ephemeral bool) {
 	flags := discordgo.MessageFlags(0)
