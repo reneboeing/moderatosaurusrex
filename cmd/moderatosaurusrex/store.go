@@ -23,6 +23,9 @@ ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAU
 CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY,guild_id TEXT NOT NULL,creator_id TEXT NOT NULL,title TEXT NOT NULL,visibility TEXT NOT NULL CHECK (visibility IN ('public','private')),invite_code TEXT UNIQUE,game_server TEXT NOT NULL,species TEXT NOT NULL DEFAULT '',starts_at TIMESTAMPTZ NOT NULL,reminder_sent BOOLEAN NOT NULL DEFAULT FALSE,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
 CREATE TABLE IF NOT EXISTS event_participants (event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,user_id TEXT NOT NULL,is_creator BOOLEAN NOT NULL DEFAULT FALSE,PRIMARY KEY(event_id,user_id));
 CREATE INDEX IF NOT EXISTS events_active_idx ON events(guild_id,starts_at);`)
+	if err == nil {
+		_, err = pool.Exec(ctx, `UPDATE events SET invite_code=NULL WHERE invite_code=''`)
+	}
 	return err
 }
 func randomHex(size int) (string, error) {
@@ -63,12 +66,16 @@ func (a *app) createEvent(ctx context.Context, e event) (event, error) {
 		}
 		e.InviteCode = "REX-" + code
 	}
+	var inviteCode any
+	if e.Visibility == "private" {
+		inviteCode = e.InviteCode
+	}
 	tx, err := a.pool.Begin(ctx)
 	if err != nil {
 		return event{}, err
 	}
 	defer tx.Rollback(ctx)
-	_, err = tx.Exec(ctx, `INSERT INTO events(id,guild_id,creator_id,title,visibility,invite_code,game_server,species,starts_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, e.ID, e.GuildID, e.CreatorID, e.Title, e.Visibility, e.InviteCode, e.GameServer, e.Species, e.StartsAt)
+	_, err = tx.Exec(ctx, `INSERT INTO events(id,guild_id,creator_id,title,visibility,invite_code,game_server,species,starts_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, e.ID, e.GuildID, e.CreatorID, e.Title, e.Visibility, inviteCode, e.GameServer, e.Species, e.StartsAt)
 	if err != nil {
 		return event{}, err
 	}
