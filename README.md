@@ -8,13 +8,15 @@ answers with `Roar! Moderatosaurus Rex is online.`
 
 ## Configuration
 
-Copy `.env.example` and set these environment variables:
+For local development, fill in the git-ignored `.env` file. For other
+environments, set these environment variables directly:
 
 - `DISCORD_TOKEN` — bot token from the Discord Developer Portal.
 - `DISCORD_APPLICATION_ID` — Discord application's Application ID.
-- `DISCORD_GUILD_ID` — optional development-server ID. When set, `/ping` is
-  registered only in that server and becomes available immediately. Without it,
-  the command is global and Discord can take time to propagate it.
+- `DISCORD_GUILD_ID` — optional development-server ID. Commands register there
+  immediately; omit it for global commands.
+- `DATABASE_URL` — PostgreSQL connection string. The bot creates its required
+  tables on startup with the configured database user.
 
 Invite the bot with the `bot` and `applications.commands` OAuth2 scopes. The
 bot needs no privileged gateway intents for this demo.
@@ -22,9 +24,9 @@ bot needs no privileged gateway intents for this demo.
 ## Run locally
 
 ```sh
-export DISCORD_TOKEN='your-bot-token'
-export DISCORD_APPLICATION_ID='your-application-id'
-export DISCORD_GUILD_ID='your-development-server-id' # optional
+set -a
+. ./.env
+set +a
 go run ./cmd/moderatosaurusrex
 ```
 
@@ -36,6 +38,7 @@ docker run --rm \
   -e DISCORD_TOKEN \
   -e DISCORD_APPLICATION_ID \
   -e DISCORD_GUILD_ID \
+  -e DATABASE_URL \
   moderatosaurusrex
 ```
 
@@ -61,9 +64,9 @@ to pull it without authenticating.
 ## Deploy with Portainer
 
 Create a new **Stack** in Portainer, paste the following Compose definition,
-then add the three Discord values as environment variables in the stack's
-environment-variable section. `DISCORD_GUILD_ID` is optional and is useful
-while developing commands in a single server.
+then add the Discord values and `POSTGRES_PASSWORD` as environment variables in
+the stack's environment-variable section. `DISCORD_GUILD_ID` is optional and
+is useful while developing commands in a single server.
 
 ```yaml
 services:
@@ -74,9 +77,47 @@ services:
       DISCORD_TOKEN: ${DISCORD_TOKEN}
       DISCORD_APPLICATION_ID: ${DISCORD_APPLICATION_ID}
       DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
+      DATABASE_URL: postgres://moderatosaurusrex:${POSTGRES_PASSWORD}@postgres:5432/moderatosaurusrex?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: moderatosaurusrex
+      POSTGRES_USER: moderatosaurusrex
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - moderatosaurusrex-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U moderatosaurusrex -d moderatosaurusrex"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  moderatosaurusrex-postgres:
 ```
 
 The bot makes an outbound connection to Discord, so this stack exposes no
 network ports. If the GHCR package is private, configure GitHub Container
 Registry credentials in Portainer before deploying; public packages need no
 registry credentials.
+
+## Event commands
+
+An administrator runs `/event configure-channel` once per server. Everyone can
+then use `/event create` with a title, their ISO-8601 local time including its
+UTC offset, visibility, Evrima server, and optional species. Public events are
+announced in the configured channel and appear in `/lfp`; their announcement
+has join and leave buttons. Slash-command fallbacks are `/event join` and
+`/event leave`.
+
+Private events are not announced or listed. Their creator receives an invite
+code in a direct message, which players use with `/event join-private`. The
+creator is automatically a participant and can end the event with `/event
+close`. A 15-minute reminder mentions all participants in the configured
+channel. Events remain active after starting and are deleted when closed or
+eight hours after their start time.
