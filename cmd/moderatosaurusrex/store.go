@@ -169,6 +169,10 @@ func (a *app) setVoiceChannel(ctx context.Context, eventID, channelID string) er
 	_, err := a.pool.Exec(ctx, `UPDATE events SET voice_channel_id=$2 WHERE id=$1`, eventID, channelID)
 	return err
 }
+func (a *app) retryReminder(ctx context.Context, eventID string) error {
+	_, err := a.pool.Exec(ctx, `UPDATE events SET reminder_sent=false WHERE id=$1`, eventID)
+	return err
+}
 func (a *app) participantIDs(ctx context.Context, eventID string) ([]string, error) {
 	rows, err := a.pool.Query(ctx, `SELECT user_id FROM event_participants WHERE event_id=$1`, eventID)
 	if err != nil {

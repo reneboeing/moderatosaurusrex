@@ -130,10 +130,11 @@ inside the configured category. Everyone then uses `/sessions create`, chooses
 public or private, and completes a short form with a session name, start time,
 optional Evrima server, and optional species.
 Play-session times use the configured server timezone and accept inputs such as
-`tomorrow 8pm`, `Friday 19:30`, and `2026-09-13 20:43`. Each public play session
-gets a temporary voice channel. Its announcement, join notices, and reminder
-are posted in that voice channel's chat, and it appears in `/sessions browse`.
-Slash-command fallbacks are `/sessions join` and `/sessions leave`.
+`tomorrow 8pm`, `Friday 19:30`, and `2026-09-13 20:43`. Public play sessions
+appear in `/sessions browse`. Fifteen minutes before they start, the bot creates
+their temporary voice channel and posts its announcement and reminder in that
+voice channel's chat. Slash-command fallbacks are `/sessions join` and
+`/sessions leave`.
 
 Private play sessions are not announced or listed. Their host receives an invite
 code in a direct message, which players use with `/sessions join-private`. The

@@ -90,6 +90,34 @@ func (a *app) processDueEvents(ctx context.Context) {
 	for _, event := range due {
 		if event.Visibility == "public" {
 			if event.VoiceChannelID == "" {
+				categoryID, err := a.sessionCategory(ctx, event.GuildID)
+				if err != nil || categoryID == "" {
+					slog.Error("public session has no configured category", "session_id", event.ID, "error", err)
+					_ = a.retryReminder(ctx, event.ID)
+					continue
+				}
+				voiceChannel, err := a.createSessionVoiceChannel(event.GuildID, categoryID, event.Title)
+				if err != nil {
+					slog.Error("create public session voice channel", "session_id", event.ID, "error", err)
+					_ = a.retryReminder(ctx, event.ID)
+					continue
+				}
+				event.VoiceChannelID = voiceChannel.ID
+				if err := a.setVoiceChannel(ctx, event.ID, voiceChannel.ID); err != nil {
+					_, _ = a.session.ChannelDelete(voiceChannel.ID)
+					slog.Error("store public session voice channel", "session_id", event.ID, "error", err)
+					_ = a.retryReminder(ctx, event.ID)
+					continue
+				}
+				if err := a.announcePublicSession(event); err != nil {
+					_ = a.setVoiceChannel(ctx, event.ID, "")
+					_, _ = a.session.ChannelDelete(voiceChannel.ID)
+					slog.Error("announce public session", "session_id", event.ID, "error", err)
+					_ = a.retryReminder(ctx, event.ID)
+					continue
+				}
+			}
+			if event.VoiceChannelID == "" {
 				slog.Error("public session has no voice channel", "session_id", event.ID)
 				continue
 			}

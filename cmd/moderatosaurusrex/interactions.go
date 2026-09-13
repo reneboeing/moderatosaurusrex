@@ -228,27 +228,7 @@ func (a *app) create(i *discordgo.InteractionCreate, o map[string]string, visibi
 		a.editReply(i, "I sent your private session invite code by DM.")
 		return
 	}
-	voiceChannel, err := a.createSessionVoiceChannel(i.GuildID, categoryID, e.Title)
-	if err != nil {
-		_, _ = a.closeEvent(context.Background(), e.ID, e.CreatorID)
-		a.editReply(i, "I could not create the session voice channel. Ensure I have the Manage Channels permission, then try again.")
-		return
-	}
-	e.VoiceChannelID = voiceChannel.ID
-	if err := a.setVoiceChannel(context.Background(), e.ID, voiceChannel.ID); err != nil {
-		_, _ = a.session.ChannelDelete(voiceChannel.ID)
-		_, _ = a.closeEvent(context.Background(), e.ID, e.CreatorID)
-		a.failDeferred(i, err)
-		return
-	}
-	_, err = a.session.ChannelMessageSendComplex(voiceChannel.ID, &discordgo.MessageSend{Content: eventText(e), Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.Button{Label: "Join session", Style: discordgo.PrimaryButton, CustomID: "join:" + e.ID}, discordgo.Button{Label: "Leave session", Style: discordgo.SecondaryButton, CustomID: "leave:" + e.ID}}}}})
-	if err != nil {
-		_, _ = a.session.ChannelDelete(voiceChannel.ID)
-		_, _ = a.closeEvent(context.Background(), e.ID, e.CreatorID)
-		a.failDeferred(i, err)
-		return
-	}
-	a.editReply(i, "Your public play session is live in "+voiceChannel.Mention()+".")
+	a.editReply(i, "Your public play session is listed in `/sessions browse`. Its voice channel will open 15 minutes before it starts.")
 }
 
 func (a *app) createSessionVoiceChannel(guildID, categoryID, title string) (*discordgo.Channel, error) {
@@ -264,6 +244,14 @@ func voiceChannelName(title string) string {
 		name = name[:100]
 	}
 	return string(name)
+}
+
+func (a *app) announcePublicSession(e event) error {
+	_, err := a.session.ChannelMessageSendComplex(e.VoiceChannelID, &discordgo.MessageSend{Content: eventText(e), Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+		discordgo.Button{Label: "Join session", Style: discordgo.PrimaryButton, CustomID: "join:" + e.ID},
+		discordgo.Button{Label: "Leave session", Style: discordgo.SecondaryButton, CustomID: "leave:" + e.ID},
+	}}}})
+	return err
 }
 
 func parseEventTime(value string, location *time.Location) (time.Time, error) {
