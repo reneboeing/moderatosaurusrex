@@ -55,3 +55,26 @@ docker pull ghcr.io/reneboeing/moderatosaurusrex:0.1.0
 Published version tags also receive matching `major.minor`, `major`, and
 `latest` tags. The package can be made public from its package settings on
 GitHub if people should be able to pull it without authenticating.
+
+## Deploy with Portainer
+
+Create a new **Stack** in Portainer, paste the following Compose definition,
+then add the three Discord values as environment variables in the stack's
+environment-variable section. `DISCORD_GUILD_ID` is optional and is useful
+while developing commands in a single server.
+
+```yaml
+services:
+  moderatosaurusrex:
+    image: ghcr.io/reneboeing/moderatosaurusrex:latest
+    restart: unless-stopped
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      DISCORD_APPLICATION_ID: ${DISCORD_APPLICATION_ID}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID}
+```
+
+The bot makes an outbound connection to Discord, so this stack exposes no
+network ports. If the GHCR package is private, configure GitHub Container
+Registry credentials in Portainer before deploying; public packages need no
+registry credentials.
