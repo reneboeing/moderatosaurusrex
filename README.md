@@ -23,12 +23,15 @@ bot needs no privileged gateway intents for this demo.
 
 ## Run locally
 
+Keep PostgreSQL running in Docker, then run the bot from a terminal you keep
+open. The bot stays attached to that terminal: its logs appear there, and
+`Ctrl+C` cleanly stops it. Starting it again is the restart procedure.
+
 ```sh
-set -a
-. ./.env
-set +a
-go run ./cmd/moderatosaurusrex
+make run
 ```
+
+Run the test suite with `make test`.
 
 ## Run with Docker
 
