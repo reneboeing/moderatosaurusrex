@@ -31,7 +31,7 @@ func registerCommands(s *discordgo.Session, appID, guildID string) error {
 			{Name: "join-private", Description: "Enter a private-session invite code.", Type: 1},
 			{Name: "leave", Description: "Choose a play session to leave.", Type: 1},
 			{Name: "end", Description: "Choose and end one of your hosted sessions.", Type: 1},
-			{Name: "configure-channel", Description: "Set the channel for session announcements and reminders.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "channel", Description: "Channel for sessions and reminders.", Type: 7, Required: true}}},
+			{Name: "configure-channel", Description: "Set where public session voice channels are created.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "channel", Description: "A category or channel used to place voice channels.", Type: 7, Required: true}}},
 			{Name: "configure-timezone", Description: "Set the server session timezone, e.g. Europe/Berlin.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "timezone", Description: "IANA timezone, e.g. Europe/Berlin.", Type: 3, Required: true}}},
 		}},
 	}
@@ -112,7 +112,7 @@ func (a *app) configure(i *discordgo.InteractionCreate, channel string) {
 		a.fail(i, err)
 		return
 	}
-	a.reply(i, text(i, "Session announcements and reminders will be sent to <#"+channel+">.", "Ankündigungen und Erinnerungen für Spielrunden werden in <#"+channel+"> gesendet."), true)
+	a.reply(i, text(i, "Public session voice channels will be created alongside <#"+channel+">.", "Öffentliche Sprachkanäle für Spielrunden werden neben <#"+channel+"> erstellt."), true)
 }
 func (a *app) configureTimezone(i *discordgo.InteractionCreate, timezone string) {
 	if i.Member == nil || i.Member.Permissions&discordgo.PermissionManageServer == 0 {
@@ -178,10 +178,6 @@ func (a *app) create(i *discordgo.InteractionCreate, o map[string]string, visibi
 	if !a.deferReply(i, true) {
 		return
 	}
-	if channel, err := a.eventChannel(context.Background(), i.GuildID); err != nil || channel == "" {
-		a.editReply(i, "An administrator must first run `/sessions configure-channel`.")
-		return
-	}
 	timezone, err := a.eventTimezone(context.Background(), i.GuildID)
 	if err != nil {
 		a.editReply(i, "An administrator must first run `/sessions configure-timezone`.")
@@ -218,13 +214,51 @@ func (a *app) create(i *discordgo.InteractionCreate, o map[string]string, visibi
 		a.editReply(i, "I sent your private session invite code by DM.")
 		return
 	}
-	channel, _ := a.eventChannel(context.Background(), i.GuildID)
-	_, err = a.session.ChannelMessageSendComplex(channel, &discordgo.MessageSend{Content: eventText(e), Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.Button{Label: "Join session", Style: discordgo.PrimaryButton, CustomID: "join:" + e.ID}, discordgo.Button{Label: "Leave session", Style: discordgo.SecondaryButton, CustomID: "leave:" + e.ID}}}}})
+	voiceChannel, err := a.createSessionVoiceChannel(i.GuildID, e.Title)
 	if err != nil {
+		_, _ = a.closeEvent(context.Background(), e.ID, e.CreatorID)
+		a.editReply(i, "I could not create the session voice channel. Ensure I have the Manage Channels permission, then try again.")
+		return
+	}
+	e.VoiceChannelID = voiceChannel.ID
+	if err := a.setVoiceChannel(context.Background(), e.ID, voiceChannel.ID); err != nil {
+		_, _ = a.session.ChannelDelete(voiceChannel.ID)
+		_, _ = a.closeEvent(context.Background(), e.ID, e.CreatorID)
 		a.failDeferred(i, err)
 		return
 	}
-	a.editReply(i, "Your public play session is live in the configured session channel.")
+	_, err = a.session.ChannelMessageSendComplex(voiceChannel.ID, &discordgo.MessageSend{Content: eventText(e), Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.Button{Label: "Join session", Style: discordgo.PrimaryButton, CustomID: "join:" + e.ID}, discordgo.Button{Label: "Leave session", Style: discordgo.SecondaryButton, CustomID: "leave:" + e.ID}}}}})
+	if err != nil {
+		_, _ = a.session.ChannelDelete(voiceChannel.ID)
+		_, _ = a.closeEvent(context.Background(), e.ID, e.CreatorID)
+		a.failDeferred(i, err)
+		return
+	}
+	a.editReply(i, "Your public play session is live in "+voiceChannel.Mention()+".")
+}
+
+func (a *app) createSessionVoiceChannel(guildID, title string) (*discordgo.Channel, error) {
+	parentID := ""
+	if configuredChannel, err := a.eventChannel(context.Background(), guildID); err == nil && configuredChannel != "" {
+		if anchor, err := a.session.Channel(configuredChannel); err == nil {
+			parentID = anchor.ParentID
+			if anchor.Type == discordgo.ChannelTypeGuildCategory {
+				parentID = anchor.ID
+			}
+		}
+	}
+	return a.session.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{Name: voiceChannelName(title), Type: discordgo.ChannelTypeGuildVoice, ParentID: parentID})
+}
+
+func voiceChannelName(title string) string {
+	name := []rune(strings.TrimSpace(title))
+	if len(name) < 2 {
+		return "roam"
+	}
+	if len(name) > 100 {
+		name = name[:100]
+	}
+	return string(name)
 }
 
 func parseEventTime(value string, location *time.Location) (time.Time, error) {
@@ -344,12 +378,17 @@ func (a *app) joinEvent(i *discordgo.InteractionCreate, id string) {
 		a.reply(i, "You are already in this play session.", true)
 		return
 	}
-	channel, err := a.eventChannel(context.Background(), i.GuildID)
-	if err == nil {
-		_, err = a.session.ChannelMessageSend(channel, "<@"+e.CreatorID+"> <@"+userID(i)+"> joined **"+e.Title+"**.")
+	if e.Visibility == "public" && e.VoiceChannelID != "" {
+		if _, err := a.session.ChannelMessageSend(e.VoiceChannelID, "<@"+e.CreatorID+"> <@"+userID(i)+"> joined **"+e.Title+"**."); err != nil {
+			slog.Error("announce public session participant", "error", err)
+		}
 	}
-	if err != nil {
-		slog.Error("announce participant", "error", err)
+	if e.Visibility == "private" {
+		if dm, err := a.session.UserChannelCreate(e.CreatorID); err == nil {
+			if _, err := a.session.ChannelMessageSend(dm.ID, "<@"+userID(i)+"> joined your private play session **"+e.Title+"**."); err != nil {
+				slog.Error("notify private session host", "error", err)
+			}
+		}
 	}
 	a.reply(i, "You joined **"+e.Title+"**.", true)
 }
@@ -382,6 +421,21 @@ func (a *app) showLeaveEvents(i *discordgo.InteractionCreate) {
 	a.replyWithComponents(i, text(i, "Choose a play session to leave:", "Wähle eine Spielrunde zum Verlassen:"), []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.SelectMenu{CustomID: "leave-select", Placeholder: text(i, "Select a play session", "Spielrunde auswählen"), Options: options, MaxValues: 1}}}}, true)
 }
 func (a *app) close(i *discordgo.InteractionCreate, id string) {
+	e, err := a.eventByID(context.Background(), i.GuildID, id)
+	if err != nil {
+		a.reply(i, "That play session no longer exists.", true)
+		return
+	}
+	if e.CreatorID != userID(i) {
+		a.reply(i, "Only the session host can end an active play session.", true)
+		return
+	}
+	if e.VoiceChannelID != "" {
+		if _, err := a.session.ChannelDelete(e.VoiceChannelID); err != nil {
+			a.reply(i, "I could not delete this session's voice channel. Please try again after checking my Manage Channels permission.", true)
+			return
+		}
+	}
 	closed, err := a.closeEvent(context.Background(), id, userID(i))
 	if err != nil {
 		a.fail(i, err)

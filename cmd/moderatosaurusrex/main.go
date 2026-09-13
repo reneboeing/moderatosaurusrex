@@ -88,9 +88,14 @@ func (a *app) processDueEvents(ctx context.Context) {
 		return
 	}
 	for _, event := range due {
-		channelID, err := a.eventChannel(ctx, event.GuildID)
-		if err != nil {
-			slog.Error("load reminder channel", "error", err)
+		if event.Visibility == "public" {
+			if event.VoiceChannelID == "" {
+				slog.Error("public session has no voice channel", "session_id", event.ID)
+				continue
+			}
+			if _, err := a.session.ChannelMessageSend(event.VoiceChannelID, "**"+event.Title+"** starts in 15 minutes."); err != nil {
+				slog.Error("send public session reminder", "session_id", event.ID, "error", err)
+			}
 			continue
 		}
 		users, err := a.participantIDs(ctx, event.ID)
@@ -98,16 +103,32 @@ func (a *app) processDueEvents(ctx context.Context) {
 			slog.Error("load reminder participants", "error", err)
 			continue
 		}
-		mentions := make([]string, 0, len(users))
 		for _, id := range users {
-			mentions = append(mentions, "<@"+id+">")
-		}
-		if _, err := a.session.ChannelMessageSend(channelID, strings.Join(mentions, " ")+" — **"+event.Title+"** starts in 15 minutes."); err != nil {
-			slog.Error("send reminder", "error", err)
+			dm, err := a.session.UserChannelCreate(id)
+			if err != nil {
+				slog.Error("open reminder DM", "user_id", id, "error", err)
+				continue
+			}
+			if _, err := a.session.ChannelMessageSend(dm.ID, "Your play session **"+event.Title+"** starts in 15 minutes."); err != nil {
+				slog.Error("send reminder DM", "user_id", id, "error", err)
+			}
 		}
 	}
-	if err := a.archiveExpired(ctx); err != nil {
+	archived, err := a.archiveExpired(ctx)
+	if err != nil {
 		slog.Error("archive expired events", "error", err)
+		return
+	}
+	for _, event := range archived {
+		if event.VoiceChannelID != "" {
+			if _, err := a.session.ChannelDelete(event.VoiceChannelID); err != nil {
+				slog.Error("delete expired session voice channel", "session_id", event.ID, "error", err)
+				continue
+			}
+		}
+		if err := a.archiveEvent(ctx, event.ID); err != nil {
+			slog.Error("archive expired session", "session_id", event.ID, "error", err)
+		}
 	}
 }
 func scope(guildID string) string {

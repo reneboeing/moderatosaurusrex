@@ -19,7 +19,8 @@ environments, set these environment variables directly:
   tables on startup with the configured database user.
 
 Invite the bot with the `bot` and `applications.commands` OAuth2 scopes. The
-bot needs no privileged gateway intents for this demo.
+bot needs no privileged gateway intents. For public play sessions, grant it
+**Manage Channels** and permission to send messages in voice-channel chat.
 
 ## Local development
 
@@ -123,18 +124,20 @@ registry credentials.
 
 ## Play sessions
 
-An administrator runs `/sessions configure-channel` and `/sessions configure-timezone`
-once per server. Everyone then uses `/sessions create`, chooses public or private,
-and completes a short form with a session name, start time, optional Evrima server,
-and optional species. Play-session times use the configured server timezone and accept
-inputs such as `tomorrow 8pm`, `Friday 19:30`, and `2026-09-13 20:43`. Public
-play sessions are announced in the configured channel and appear in `/sessions
-browse`; their announcement has join and leave buttons. Slash-command fallbacks
-are `/sessions join` and `/sessions leave`.
+An administrator runs `/sessions configure-timezone` once per server. They can
+also use `/sessions configure-channel` to choose a category or existing channel
+alongside which public session voice channels should be created. Everyone then
+uses `/sessions create`, chooses public or private, and completes a short form
+with a session name, start time, optional Evrima server, and optional species.
+Play-session times use the configured server timezone and accept inputs such as
+`tomorrow 8pm`, `Friday 19:30`, and `2026-09-13 20:43`. Each public play session
+gets a temporary voice channel. Its announcement, join notices, and reminder
+are posted in that voice channel's chat, and it appears in `/sessions browse`.
+Slash-command fallbacks are `/sessions join` and `/sessions leave`.
 
 Private play sessions are not announced or listed. Their host receives an invite
 code in a direct message, which players use with `/sessions join-private`. The
 host is automatically a participant and can end the session with `/sessions
-end`. A 15-minute reminder mentions all participants in the configured channel.
-Sessions remain active after starting and are deleted when ended or eight hours
-after their start time.
+end`. Its 15-minute reminder is sent directly to every participant. Sessions
+remain active after starting and are deleted when ended or eight hours after
+their start time; associated public voice channels are deleted at the same time.
