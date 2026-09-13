@@ -200,7 +200,7 @@ func (a *app) create(i *discordgo.InteractionCreate, o map[string]string, visibi
 		return
 	}
 	categoryID := ""
-	if visibility == "public" {
+	if visibility == "public" || visibility == "private" {
 		var err error
 		categoryID, err = a.sessionCategory(context.Background(), i.GuildID)
 		if err != nil || categoryID == "" {
@@ -233,11 +233,32 @@ func (a *app) create(i *discordgo.InteractionCreate, o map[string]string, visibi
 		return
 	}
 	if e.Visibility == "private" {
+		role, err := a.session.GuildRoleCreate(e.GuildID, &discordgo.RoleParams{Name: "Session: " + voiceChannelName(e.Title)})
+		if err != nil {
+			_, _ = a.closeEvent(context.Background(), e.ID)
+			a.editReply(i, "I could not create the private session role. Ensure I have the Manage Roles permission, then try again.")
+			return
+		}
+		e.RoleID = role.ID
+		if err := a.setSessionRole(context.Background(), e.ID, role.ID); err != nil {
+			_ = a.session.GuildRoleDelete(e.GuildID, role.ID)
+			_, _ = a.closeEvent(context.Background(), e.ID)
+			a.failDeferred(i, err)
+			return
+		}
+		if err := a.session.GuildMemberRoleAdd(e.GuildID, e.CreatorID, role.ID); err != nil {
+			_ = a.session.GuildRoleDelete(e.GuildID, role.ID)
+			_, _ = a.closeEvent(context.Background(), e.ID)
+			a.editReply(i, "I could not assign the private session role. Ensure I have the Manage Roles permission, then try again.")
+			return
+		}
 		dm, err := a.session.UserChannelCreate(userID(i))
 		if err == nil {
 			_, err = a.session.ChannelMessageSend(dm.ID, "Your private **"+e.Title+"** play session is ready. Share invite code `"+e.InviteCode+"`. Participants join with `/sessions join-private` and the code.")
 		}
 		if err != nil {
+			_ = a.session.GuildRoleDelete(e.GuildID, e.RoleID)
+			_, _ = a.closeEvent(context.Background(), e.ID)
 			a.editReply(i, "I could not DM you the private invite code. Enable DMs from server members and try again.")
 			return
 		}
@@ -249,6 +270,14 @@ func (a *app) create(i *discordgo.InteractionCreate, o map[string]string, visibi
 
 func (a *app) createSessionVoiceChannel(guildID, categoryID, title string) (*discordgo.Channel, error) {
 	return a.session.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{Name: voiceChannelName(title), Type: discordgo.ChannelTypeGuildVoice, ParentID: categoryID})
+}
+
+func (a *app) createPrivateSessionVoiceChannel(e event, categoryID string) (*discordgo.Channel, error) {
+	permissions := int64(discordgo.PermissionViewChannel | discordgo.PermissionVoiceConnect | discordgo.PermissionVoiceSpeak | discordgo.PermissionSendMessages)
+	return a.session.GuildChannelCreateComplex(e.GuildID, discordgo.GuildChannelCreateData{Name: voiceChannelName(e.Title), Type: discordgo.ChannelTypeGuildVoice, ParentID: categoryID, PermissionOverwrites: []*discordgo.PermissionOverwrite{
+		{ID: e.GuildID, Type: discordgo.PermissionOverwriteTypeRole, Deny: permissions},
+		{ID: e.RoleID, Type: discordgo.PermissionOverwriteTypeRole, Allow: permissions},
+	}})
 }
 
 func voiceChannelName(title string) string {
@@ -393,6 +422,13 @@ func (a *app) joinEvent(i *discordgo.InteractionCreate, id string) {
 		}
 	}
 	if e.Visibility == "private" {
+		if e.RoleID != "" {
+			if err := a.session.GuildMemberRoleAdd(e.GuildID, userID(i), e.RoleID); err != nil {
+				_, _ = a.leaveEvent(context.Background(), id, userID(i))
+				a.reply(i, "I could not grant access to the private session. Please ask an administrator to check my Manage Roles permission.", true)
+				return
+			}
+		}
 		if dm, err := a.session.UserChannelCreate(e.CreatorID); err == nil {
 			if _, err := a.session.ChannelMessageSend(dm.ID, "<@"+userID(i)+"> joined your private play session **"+e.Title+"**."); err != nil {
 				slog.Error("notify private session host", "error", err)
@@ -445,7 +481,13 @@ func (a *app) close(i *discordgo.InteractionCreate, id string) {
 			return
 		}
 	}
-	closed, err := a.closeEvent(context.Background(), id, userID(i))
+	if e.RoleID != "" {
+		if err := a.session.GuildRoleDelete(e.GuildID, e.RoleID); err != nil {
+			a.reply(i, "I could not delete this session's private role. Please try again after checking my Manage Roles permission.", true)
+			return
+		}
+	}
+	closed, err := a.closeEvent(context.Background(), id)
 	if err != nil {
 		a.fail(i, err)
 		return

@@ -126,6 +126,30 @@ func (a *app) processDueEvents(ctx context.Context) {
 			}
 			continue
 		}
+		if event.VoiceChannelID == "" {
+			categoryID, err := a.sessionCategory(ctx, event.GuildID)
+			if err != nil || categoryID == "" || event.RoleID == "" {
+				slog.Error("private session has no configured category or role", "session_id", event.ID, "error", err)
+				_ = a.retryReminder(ctx, event.ID)
+				continue
+			}
+			voiceChannel, err := a.createPrivateSessionVoiceChannel(event, categoryID)
+			if err != nil {
+				slog.Error("create private session voice channel", "session_id", event.ID, "error", err)
+				_ = a.retryReminder(ctx, event.ID)
+				continue
+			}
+			event.VoiceChannelID = voiceChannel.ID
+			if err := a.setVoiceChannel(ctx, event.ID, voiceChannel.ID); err != nil {
+				_, _ = a.session.ChannelDelete(voiceChannel.ID)
+				slog.Error("store private session voice channel", "session_id", event.ID, "error", err)
+				_ = a.retryReminder(ctx, event.ID)
+				continue
+			}
+			if _, err := a.session.ChannelMessageSend(event.VoiceChannelID, "**"+event.Title+"** starts in 15 minutes. Only session-role members can join this voice channel."); err != nil {
+				slog.Error("announce private session", "session_id", event.ID, "error", err)
+			}
+		}
 		users, err := a.participantIDs(ctx, event.ID)
 		if err != nil {
 			slog.Error("load reminder participants", "error", err)
@@ -151,6 +175,12 @@ func (a *app) processDueEvents(ctx context.Context) {
 		if event.VoiceChannelID != "" {
 			if _, err := a.session.ChannelDelete(event.VoiceChannelID); err != nil {
 				slog.Error("delete expired session voice channel", "session_id", event.ID, "error", err)
+				continue
+			}
+		}
+		if event.RoleID != "" {
+			if err := a.session.GuildRoleDelete(event.GuildID, event.RoleID); err != nil {
+				slog.Error("delete expired private session role", "session_id", event.ID, "error", err)
 				continue
 			}
 		}
