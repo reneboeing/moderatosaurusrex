@@ -25,6 +25,7 @@ func registerCommands(s *discordgo.Session, appID, guildID string) error {
 	commands := []*discordgo.ApplicationCommand{
 		{Name: "ping", Description: "Check whether Moderatosaurus Rex is online."},
 		{Name: "sessions", Description: "Host, find, and manage Evrima play sessions.", Options: []*discordgo.ApplicationCommandOption{
+			{Name: "help", Description: "Learn how to use play sessions.", Type: discordgo.ApplicationCommandOptionSubCommand},
 			{Name: "browse", Description: "Browse public play sessions.", Type: discordgo.ApplicationCommandOptionSubCommand},
 			{Name: "create", Description: "Open the guided play-session form.", Type: 1},
 			{Name: "join", Description: "Choose a public play session to join.", Type: 1},
@@ -81,6 +82,8 @@ func (a *app) handleCommand(i *discordgo.InteractionCreate) {
 		opts[o.Name] = fmt.Sprint(o.Value)
 	}
 	switch sub.Name {
+	case "help":
+		a.showHelp(i)
 	case "browse":
 		a.list(i)
 	case "configure-category":
@@ -102,6 +105,19 @@ func (a *app) handleCommand(i *discordgo.InteractionCreate) {
 			a.showCloseEvents(i)
 		}
 	}
+}
+func (a *app) showHelp(i *discordgo.InteractionCreate) {
+	a.reply(i, text(i,
+		"**Moderatosaurus Rex — play sessions**\n"+
+			"Use `/sessions browse` to find public roams and join from the list.\n"+
+			"Use `/sessions create` to host a public or private session. Public sessions open a voice channel 15 minutes before they begin. Private hosts receive an invite code by DM; players join with `/sessions join-private`.\n"+
+			"Use `/sessions leave` to leave and `/sessions end` to end a session you host.\n"+
+			"Admins: use `/sessions configure-timezone` and `/sessions configure-category` once per server.",
+		"**Moderatosaurus Rex — Spielrunden**\n"+
+			"Mit `/sessions browse` findest du öffentliche Runden und kannst direkt aus der Liste beitreten.\n"+
+			"Mit `/sessions create` erstellst du eine öffentliche oder private Spielrunde. Für öffentliche Runden wird 15 Minuten vorher ein Sprachkanal geöffnet. Hosts privater Runden erhalten per DM einen Einladungscode; Spieler treten mit `/sessions join-private` bei.\n"+
+			"Mit `/sessions leave` verlässt du eine Runde; mit `/sessions end` beendest du eine von dir gehostete Runde.\n"+
+			"Admins: `/sessions configure-timezone` und `/sessions configure-category` werden pro Server einmal eingerichtet."), true)
 }
 func (a *app) configureCategory(i *discordgo.InteractionCreate, category string) {
 	if i.Member == nil || i.Member.Permissions&discordgo.PermissionManageServer == 0 {
