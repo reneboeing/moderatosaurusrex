@@ -36,8 +36,8 @@ func randomHex(size int) (string, error) {
 	}
 	return hex.EncodeToString(b), nil
 }
-func (a *app) setEventChannel(ctx context.Context, guildID, channelID string) error {
-	_, err := a.pool.Exec(ctx, `INSERT INTO guild_settings(guild_id,channel_id) VALUES($1,$2) ON CONFLICT(guild_id) DO UPDATE SET channel_id=EXCLUDED.channel_id`, guildID, channelID)
+func (a *app) setSessionCategory(ctx context.Context, guildID, categoryID string) error {
+	_, err := a.pool.Exec(ctx, `INSERT INTO guild_settings(guild_id,channel_id) VALUES($1,$2) ON CONFLICT(guild_id) DO UPDATE SET channel_id=EXCLUDED.channel_id`, guildID, categoryID)
 	return err
 }
 func (a *app) setTimezone(ctx context.Context, guildID, timezone string) error {
@@ -49,7 +49,7 @@ func (a *app) eventTimezone(ctx context.Context, guildID string) (string, error)
 	err := a.pool.QueryRow(ctx, `SELECT timezone FROM guild_settings WHERE guild_id=$1`, guildID).Scan(&timezone)
 	return timezone, err
 }
-func (a *app) eventChannel(ctx context.Context, guildID string) (string, error) {
+func (a *app) sessionCategory(ctx context.Context, guildID string) (string, error) {
 	var id string
 	err := a.pool.QueryRow(ctx, `SELECT channel_id FROM guild_settings WHERE guild_id=$1`, guildID).Scan(&id)
 	return id, err

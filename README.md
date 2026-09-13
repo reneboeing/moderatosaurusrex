@@ -124,11 +124,11 @@ registry credentials.
 
 ## Play sessions
 
-An administrator runs `/sessions configure-timezone` once per server. They can
-also use `/sessions configure-channel` to choose a category or existing channel
-alongside which public session voice channels should be created. Everyone then
-uses `/sessions create`, chooses public or private, and completes a short form
-with a session name, start time, optional Evrima server, and optional species.
+An administrator runs `/sessions configure-timezone` and `/sessions
+configure-category` once per server. Public session voice channels are created
+inside the configured category. Everyone then uses `/sessions create`, chooses
+public or private, and completes a short form with a session name, start time,
+optional Evrima server, and optional species.
 Play-session times use the configured server timezone and accept inputs such as
 `tomorrow 8pm`, `Friday 19:30`, and `2026-09-13 20:43`. Each public play session
 gets a temporary voice channel. Its announcement, join notices, and reminder

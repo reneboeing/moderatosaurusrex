@@ -31,7 +31,7 @@ func registerCommands(s *discordgo.Session, appID, guildID string) error {
 			{Name: "join-private", Description: "Enter a private-session invite code.", Type: 1},
 			{Name: "leave", Description: "Choose a play session to leave.", Type: 1},
 			{Name: "end", Description: "Choose and end one of your hosted sessions.", Type: 1},
-			{Name: "configure-channel", Description: "Set where public session voice channels are created.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "channel", Description: "A category or channel used to place voice channels.", Type: 7, Required: true}}},
+			{Name: "configure-category", Description: "Set the category for public session voice channels.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "category", Description: "Category for public session voice channels.", Type: 7, ChannelTypes: []discordgo.ChannelType{discordgo.ChannelTypeGuildCategory}, Required: true}}},
 			{Name: "configure-timezone", Description: "Set the server session timezone, e.g. Europe/Berlin.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "timezone", Description: "IANA timezone, e.g. Europe/Berlin.", Type: 3, Required: true}}},
 		}},
 	}
@@ -83,8 +83,8 @@ func (a *app) handleCommand(i *discordgo.InteractionCreate) {
 	switch sub.Name {
 	case "browse":
 		a.list(i)
-	case "configure-channel":
-		a.configure(i, opts["channel"])
+	case "configure-category":
+		a.configureCategory(i, opts["category"])
 	case "configure-timezone":
 		a.configureTimezone(i, opts["timezone"])
 	case "create":
@@ -103,16 +103,21 @@ func (a *app) handleCommand(i *discordgo.InteractionCreate) {
 		}
 	}
 }
-func (a *app) configure(i *discordgo.InteractionCreate, channel string) {
+func (a *app) configureCategory(i *discordgo.InteractionCreate, category string) {
 	if i.Member == nil || i.Member.Permissions&discordgo.PermissionManageServer == 0 {
-		a.reply(i, "You need the Manage Server permission to configure the session channel.", true)
+		a.reply(i, "You need the Manage Server permission to configure the session category.", true)
 		return
 	}
-	if err := a.setEventChannel(context.Background(), i.GuildID, channel); err != nil {
+	selected, err := a.session.Channel(category)
+	if err != nil || selected.Type != discordgo.ChannelTypeGuildCategory {
+		a.reply(i, "Choose a server category for public session voice channels.", true)
+		return
+	}
+	if err := a.setSessionCategory(context.Background(), i.GuildID, category); err != nil {
 		a.fail(i, err)
 		return
 	}
-	a.reply(i, text(i, "Public session voice channels will be created alongside <#"+channel+">.", "Öffentliche Sprachkanäle für Spielrunden werden neben <#"+channel+"> erstellt."), true)
+	a.reply(i, text(i, "Public session voice channels will be created in <#"+category+">.", "Öffentliche Sprachkanäle für Spielrunden werden in <#"+category+"> erstellt."), true)
 }
 func (a *app) configureTimezone(i *discordgo.InteractionCreate, timezone string) {
 	if i.Member == nil || i.Member.Permissions&discordgo.PermissionManageServer == 0 {
@@ -178,6 +183,15 @@ func (a *app) create(i *discordgo.InteractionCreate, o map[string]string, visibi
 	if !a.deferReply(i, true) {
 		return
 	}
+	categoryID := ""
+	if visibility == "public" {
+		var err error
+		categoryID, err = a.sessionCategory(context.Background(), i.GuildID)
+		if err != nil || categoryID == "" {
+			a.editReply(i, "An administrator must first run `/sessions configure-category`.")
+			return
+		}
+	}
 	timezone, err := a.eventTimezone(context.Background(), i.GuildID)
 	if err != nil {
 		a.editReply(i, "An administrator must first run `/sessions configure-timezone`.")
@@ -214,7 +228,7 @@ func (a *app) create(i *discordgo.InteractionCreate, o map[string]string, visibi
 		a.editReply(i, "I sent your private session invite code by DM.")
 		return
 	}
-	voiceChannel, err := a.createSessionVoiceChannel(i.GuildID, e.Title)
+	voiceChannel, err := a.createSessionVoiceChannel(i.GuildID, categoryID, e.Title)
 	if err != nil {
 		_, _ = a.closeEvent(context.Background(), e.ID, e.CreatorID)
 		a.editReply(i, "I could not create the session voice channel. Ensure I have the Manage Channels permission, then try again.")
@@ -237,17 +251,8 @@ func (a *app) create(i *discordgo.InteractionCreate, o map[string]string, visibi
 	a.editReply(i, "Your public play session is live in "+voiceChannel.Mention()+".")
 }
 
-func (a *app) createSessionVoiceChannel(guildID, title string) (*discordgo.Channel, error) {
-	parentID := ""
-	if configuredChannel, err := a.eventChannel(context.Background(), guildID); err == nil && configuredChannel != "" {
-		if anchor, err := a.session.Channel(configuredChannel); err == nil {
-			parentID = anchor.ParentID
-			if anchor.Type == discordgo.ChannelTypeGuildCategory {
-				parentID = anchor.ID
-			}
-		}
-	}
-	return a.session.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{Name: voiceChannelName(title), Type: discordgo.ChannelTypeGuildVoice, ParentID: parentID})
+func (a *app) createSessionVoiceChannel(guildID, categoryID, title string) (*discordgo.Channel, error) {
+	return a.session.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{Name: voiceChannelName(title), Type: discordgo.ChannelTypeGuildVoice, ParentID: categoryID})
 }
 
 func voiceChannelName(title string) string {
