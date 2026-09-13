@@ -16,9 +16,9 @@ func registerCommands(s *discordgo.Session, appID, guildID string) error {
 		{Name: "lfp", Description: "List public packs looking for players."},
 		{Name: "event", Description: "Create and manage pack events.", Options: []*discordgo.ApplicationCommandOption{
 			{Name: "create", Description: "Open the guided event form.", Type: discordgo.ApplicationCommandOptionSubCommand},
-			{Name: "join", Description: "Join a public event.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "event_id", Description: "The event ID from /lfp.", Type: 3, Required: true}}},
-			{Name: "join-private", Description: "Join a private event by invite code.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "invite_code", Description: "Invite code from the creator.", Type: 3, Required: true}}},
-			{Name: "leave", Description: "Leave an event.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "event_id", Description: "The event ID.", Type: 3, Required: true}}},
+			{Name: "join", Description: "Choose a public event to join.", Type: 1},
+			{Name: "join-private", Description: "Enter a private-event invite code.", Type: 1},
+			{Name: "leave", Description: "Choose an event to leave.", Type: 1},
 			{Name: "close", Description: "Choose and close one of your events.", Type: 1},
 			{Name: "configure-channel", Description: "Set the channel for event announcements and reminders.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "channel", Description: "Channel for events and reminders.", Type: 7, Required: true}}},
 			{Name: "configure-timezone", Description: "Set the server event timezone, e.g. Europe/Berlin.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "timezone", Description: "IANA timezone, e.g. Europe/Berlin.", Type: 3, Required: true}}},
@@ -81,11 +81,11 @@ func (a *app) handleCommand(i *discordgo.InteractionCreate) {
 	case "create":
 		a.showCreateChoice(i)
 	case "join":
-		a.join(i, opts["event_id"])
+		a.showJoinEvents(i)
 	case "join-private":
-		a.joinPrivate(i, strings.ToUpper(opts["invite_code"]))
+		a.showPrivateJoinModal(i)
 	case "leave":
-		a.leave(i, opts["event_id"])
+		a.showLeaveEvents(i)
 	case "close":
 		if opts["event_id"] != "" {
 			a.close(i, opts["event_id"])
@@ -150,10 +150,20 @@ func modalValues(i *discordgo.InteractionCreate) map[string]string {
 func (a *app) handleModal(i *discordgo.InteractionCreate) {
 	data := i.ModalSubmitData()
 	parts := strings.Split(data.CustomID, ":")
+	if data.CustomID == "private-join" {
+		a.joinPrivate(i, strings.ToUpper(modalValues(i)["invite_code"]))
+		return
+	}
 	if len(parts) != 2 || parts[0] != "event-create" {
 		return
 	}
 	a.create(i, modalValues(i), parts[1])
+}
+func (a *app) showPrivateJoinModal(i *discordgo.InteractionCreate) {
+	err := a.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseModal, Data: &discordgo.InteractionResponseData{CustomID: "private-join", Title: text(i, "Join private event", "Privatem Event beitreten"), Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "invite_code", Label: text(i, "Invite code", "Einladungscode"), Placeholder: "REX-1234abcd", Style: discordgo.TextInputShort, Required: true, MaxLength: 32}}}}}})
+	if err != nil {
+		slog.Error("open private join form", "error", err)
+	}
 }
 func (a *app) create(i *discordgo.InteractionCreate, o map[string]string, visibility string) {
 	if channel, err := a.eventChannel(context.Background(), i.GuildID); err != nil || channel == "" {
@@ -271,15 +281,18 @@ func (a *app) list(i *discordgo.InteractionCreate) {
 		return
 	}
 	if len(events) == 0 {
-		a.reply(i, "No public packs are looking for players right now.", true)
+		a.reply(i, text(i, "No public packs are looking for players right now.", "Zurzeit suchen keine öffentlichen Packs nach Spielern."), true)
 		return
 	}
 	lines := make([]string, 0, len(events))
+	options := make([]discordgo.SelectMenuOption, 0, len(events))
 	for _, e := range events {
 		lines = append(lines, eventText(e))
+		options = append(options, discordgo.SelectMenuOption{Label: e.Title, Value: e.ID, Description: e.StartsAt.Format("2006-01-02 15:04 UTC")})
 	}
-	a.reply(i, "**Looking for pack**\n\n"+strings.Join(lines, "\n\n"), true)
+	a.replyWithComponents(i, "**"+text(i, "Looking for pack", "Suche nach Pack")+"**\n\n"+strings.Join(lines, "\n\n"), []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.SelectMenu{CustomID: "join-select", Placeholder: text(i, "Choose a pack to join", "Wähle ein Pack zum Beitreten"), Options: options, MaxValues: 1}}}}, true)
 }
+func (a *app) showJoinEvents(i *discordgo.InteractionCreate) { a.list(i) }
 func (a *app) joinPrivate(i *discordgo.InteractionCreate, code string) {
 	e, err := a.eventByCode(context.Background(), i.GuildID, code)
 	if err != nil {
@@ -336,6 +349,22 @@ func (a *app) leave(i *discordgo.InteractionCreate, id string) {
 	}
 	a.reply(i, "You left the event.", true)
 }
+func (a *app) showLeaveEvents(i *discordgo.InteractionCreate) {
+	events, err := a.participantEvents(context.Background(), i.GuildID, userID(i))
+	if err != nil {
+		a.fail(i, err)
+		return
+	}
+	if len(events) == 0 {
+		a.reply(i, text(i, "You have no events to leave.", "Du hast keine Events zum Verlassen."), true)
+		return
+	}
+	options := make([]discordgo.SelectMenuOption, 0, len(events))
+	for _, e := range events {
+		options = append(options, discordgo.SelectMenuOption{Label: e.Title, Value: e.ID, Description: e.StartsAt.Format("2006-01-02 15:04 UTC")})
+	}
+	a.replyWithComponents(i, text(i, "Choose an event to leave:", "Wähle ein Event zum Verlassen:"), []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.SelectMenu{CustomID: "leave-select", Placeholder: text(i, "Select an event", "Event auswählen"), Options: options, MaxValues: 1}}}}, true)
+}
 func (a *app) close(i *discordgo.InteractionCreate, id string) {
 	closed, err := a.closeEvent(context.Background(), id, userID(i))
 	if err != nil {
@@ -369,6 +398,20 @@ func (a *app) handleButton(i *discordgo.InteractionCreate) {
 		values := i.MessageComponentData().Values
 		if len(values) == 1 {
 			a.close(i, values[0])
+		}
+		return
+	}
+	if i.MessageComponentData().CustomID == "join-select" {
+		values := i.MessageComponentData().Values
+		if len(values) == 1 {
+			a.join(i, values[0])
+		}
+		return
+	}
+	if i.MessageComponentData().CustomID == "leave-select" {
+		values := i.MessageComponentData().Values
+		if len(values) == 1 {
+			a.leave(i, values[0])
 		}
 		return
 	}
