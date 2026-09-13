@@ -150,20 +150,8 @@ func (a *app) processDueEvents(ctx context.Context) {
 				slog.Error("announce private session", "session_id", event.ID, "error", err)
 			}
 		}
-		users, err := a.participantIDs(ctx, event.ID)
-		if err != nil {
-			slog.Error("load reminder participants", "error", err)
-			continue
-		}
-		for _, id := range users {
-			dm, err := a.session.UserChannelCreate(id)
-			if err != nil {
-				slog.Error("open reminder DM", "user_id", id, "error", err)
-				continue
-			}
-			if _, err := a.session.ChannelMessageSend(dm.ID, "Your play session **"+event.Title+"** starts in 15 minutes."); err != nil {
-				slog.Error("send reminder DM", "user_id", id, "error", err)
-			}
+		if _, err := a.session.ChannelMessageSend(event.VoiceChannelID, "**"+event.Title+"** starts in 15 minutes."); err != nil {
+			slog.Error("send private session reminder", "session_id", event.ID, "error", err)
 		}
 	}
 	archived, err := a.archiveExpired(ctx)

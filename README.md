@@ -141,7 +141,7 @@ code in a direct message, which players use with `/sessions join-private`. The
 bot creates a temporary role for the host and participants; 15 minutes before
 the session, it creates a voice channel that only this role can view or join.
 The host can end the session with `/sessions end`. Its 15-minute reminder is
-sent directly to every participant. Sessions
+posted in that role-restricted voice channel's chat. Sessions
 remain active after starting and are deleted when ended or eight hours after
 their start time; associated public voice channels are deleted at the same time.
 The host or a server administrator can end a session at any time. The bot needs
