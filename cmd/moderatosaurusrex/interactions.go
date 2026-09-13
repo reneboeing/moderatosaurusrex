@@ -15,13 +15,13 @@ func registerCommands(s *discordgo.Session, appID, guildID string) error {
 		{Name: "ping", Description: "Check whether Moderatosaurus Rex is online."},
 		{Name: "lfp", Description: "List public packs looking for players."},
 		{Name: "event", Description: "Create and manage pack events.", Options: []*discordgo.ApplicationCommandOption{
-			{Name: "create", Description: "Create a pack event.", Type: discordgo.ApplicationCommandOptionSubCommand, Options: []*discordgo.ApplicationCommandOption{
-				{Name: "title", Description: "Name for this pack.", Type: 3, Required: true}, {Name: "when", Description: "Your local ISO-8601 time, e.g. 2026-09-13T20:00+02:00.", Type: 3, Required: true}, {Name: "visibility", Description: "Who can discover this event.", Type: 3, Required: true, Choices: []*discordgo.ApplicationCommandOptionChoice{{Name: "Public", Value: "public"}, {Name: "Private", Value: "private"}}}, {Name: "server", Description: "Desired Evrima server.", Type: 3, Required: true}, {Name: "species", Description: "Optional desired dinosaur species.", Type: 3}}},
+			{Name: "create", Description: "Open the guided event form.", Type: discordgo.ApplicationCommandOptionSubCommand},
 			{Name: "join", Description: "Join a public event.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "event_id", Description: "The event ID from /lfp.", Type: 3, Required: true}}},
 			{Name: "join-private", Description: "Join a private event by invite code.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "invite_code", Description: "Invite code from the creator.", Type: 3, Required: true}}},
 			{Name: "leave", Description: "Leave an event.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "event_id", Description: "The event ID.", Type: 3, Required: true}}},
 			{Name: "close", Description: "Close your event and remove it from /lfp.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "event_id", Description: "The event ID.", Type: 3, Required: true}}},
 			{Name: "configure-channel", Description: "Set the channel for event announcements and reminders.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "channel", Description: "Channel for events and reminders.", Type: 7, Required: true}}},
+			{Name: "configure-timezone", Description: "Set the server event timezone, e.g. Europe/Berlin.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "timezone", Description: "IANA timezone, e.g. Europe/Berlin.", Type: 3, Required: true}}},
 		}},
 	}
 	for _, c := range commands {
@@ -38,6 +38,8 @@ func (a *app) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 		a.handleCommand(i)
 	case discordgo.InteractionMessageComponent:
 		a.handleButton(i)
+	case discordgo.InteractionModalSubmit:
+		a.handleModal(i)
 	}
 }
 func userID(i *discordgo.InteractionCreate) string {
@@ -74,8 +76,10 @@ func (a *app) handleCommand(i *discordgo.InteractionCreate) {
 	switch sub.Name {
 	case "configure-channel":
 		a.configure(i, opts["channel"])
+	case "configure-timezone":
+		a.configureTimezone(i, opts["timezone"])
 	case "create":
-		a.create(i, opts)
+		a.showCreateChoice(i)
 	case "join":
 		a.join(i, opts["event_id"])
 	case "join-private":
@@ -97,21 +101,81 @@ func (a *app) configure(i *discordgo.InteractionCreate, channel string) {
 	}
 	a.reply(i, "Event announcements and reminders will be sent to <#"+channel+">.", true)
 }
-func (a *app) create(i *discordgo.InteractionCreate, o map[string]string) {
-	if _, err := a.eventChannel(context.Background(), i.GuildID); err != nil {
+func (a *app) configureTimezone(i *discordgo.InteractionCreate, timezone string) {
+	if i.Member == nil || i.Member.Permissions&discordgo.PermissionManageServer == 0 {
+		a.reply(i, "You need the Manage Server permission to configure the event timezone.", true)
+		return
+	}
+	if _, err := time.LoadLocation(timezone); err != nil {
+		a.reply(i, "Use an IANA timezone such as `Europe/Berlin` or `America/New_York`.", true)
+		return
+	}
+	if err := a.setTimezone(context.Background(), i.GuildID, timezone); err != nil {
+		a.fail(i, err)
+		return
+	}
+	a.reply(i, "Event times for this server now use `"+timezone+"`.", true)
+}
+func (a *app) showCreateChoice(i *discordgo.InteractionCreate) {
+	a.replyWithComponents(i, "Choose who can discover this event:", []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+		discordgo.Button{Label: "Public event", Style: discordgo.PrimaryButton, CustomID: "create:public"},
+		discordgo.Button{Label: "Private event", Style: discordgo.SecondaryButton, CustomID: "create:private"},
+	}}}, true)
+}
+func (a *app) showCreateModal(i *discordgo.InteractionCreate, visibility string) {
+	err := a.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseModal, Data: &discordgo.InteractionResponseData{CustomID: "event-create:" + visibility, Title: "Create pack event", Components: []discordgo.MessageComponent{
+		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "title", Label: "Pack name", Style: discordgo.TextInputShort, Required: true, MaxLength: 100}}},
+		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "when", Label: "When (server timezone)", Style: discordgo.TextInputShort, Placeholder: "tomorrow 8pm, Friday 19:30, or 2026-09-13 20:43", Required: true, MaxLength: 64}}},
+		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "server", Label: "Evrima server", Style: discordgo.TextInputShort, Required: true, MaxLength: 100}}},
+		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "species", Label: "Desired species (optional)", Style: discordgo.TextInputShort, Required: false, MaxLength: 100}}},
+	}}})
+	if err != nil {
+		slog.Error("open event form", "error", err)
+	}
+}
+func modalValues(i *discordgo.InteractionCreate) map[string]string {
+	values := map[string]string{}
+	for _, row := range i.ModalSubmitData().Components {
+		for _, component := range row.(*discordgo.ActionsRow).Components {
+			input := component.(*discordgo.TextInput)
+			values[input.CustomID] = strings.TrimSpace(input.Value)
+		}
+	}
+	return values
+}
+func (a *app) handleModal(i *discordgo.InteractionCreate) {
+	data := i.ModalSubmitData()
+	parts := strings.Split(data.CustomID, ":")
+	if len(parts) != 2 || parts[0] != "event-create" {
+		return
+	}
+	a.create(i, modalValues(i), parts[1])
+}
+func (a *app) create(i *discordgo.InteractionCreate, o map[string]string, visibility string) {
+	if channel, err := a.eventChannel(context.Background(), i.GuildID); err != nil || channel == "" {
 		a.reply(i, "An administrator must first run `/event configure-channel`.", true)
 		return
 	}
-	when, err := parseEventTime(o["when"])
+	timezone, err := a.eventTimezone(context.Background(), i.GuildID)
 	if err != nil {
-		a.reply(i, "Use an ISO-8601 time including your UTC offset, for example `2026-09-13T20:00+02:00`.", true)
+		a.reply(i, "An administrator must first run `/event configure-timezone`.", true)
+		return
+	}
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		a.fail(i, err)
+		return
+	}
+	when, err := parseEventTime(o["when"], location)
+	if err != nil {
+		a.reply(i, "Try `tomorrow 8pm`, `Friday 19:30`, or `2026-09-13 20:43`.", true)
 		return
 	}
 	if when.Before(time.Now()) {
 		a.reply(i, "The event time must be in the future.", true)
 		return
 	}
-	e, err := a.createEvent(context.Background(), event{GuildID: i.GuildID, CreatorID: userID(i), Title: o["title"], Visibility: o["visibility"], GameServer: o["server"], Species: o["species"], StartsAt: when.UTC()})
+	e, err := a.createEvent(context.Background(), event{GuildID: i.GuildID, CreatorID: userID(i), Title: o["title"], Visibility: visibility, GameServer: o["server"], Species: o["species"], StartsAt: when.UTC()})
 	if err != nil {
 		a.fail(i, err)
 		return
@@ -137,14 +201,50 @@ func (a *app) create(i *discordgo.InteractionCreate, o map[string]string) {
 	a.reply(i, "Your public event is live in the configured event channel.", true)
 }
 
-func parseEventTime(value string) (time.Time, error) {
+func parseEventTime(value string, location *time.Location) (time.Time, error) {
 	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04Z07:00"} {
 		when, err := time.Parse(layout, value)
 		if err == nil {
 			return when, nil
 		}
 	}
+	value = strings.ToLower(strings.TrimSpace(value))
+	now := time.Now().In(location)
+	for prefix, days := range map[string]int{"today ": 0, "tomorrow ": 1} {
+		if clock, ok := strings.CutPrefix(value, prefix); ok {
+			return parseClock(now.AddDate(0, 0, days), clock, location)
+		}
+	}
+	for weekday, target := range map[string]time.Weekday{"sunday": time.Sunday, "monday": time.Monday, "tuesday": time.Tuesday, "wednesday": time.Wednesday, "thursday": time.Thursday, "friday": time.Friday, "saturday": time.Saturday} {
+		if clock, ok := strings.CutPrefix(value, weekday+" "); ok {
+			days := (int(target) - int(now.Weekday()) + 7) % 7
+			if days == 0 {
+				days = 7
+			}
+			return parseClock(now.AddDate(0, 0, days), clock, location)
+		}
+	}
+	for _, layout := range []string{"2006-01-02 15:04", "2 jan 15:04", "jan 2 15:04"} {
+		if when, err := time.ParseInLocation(layout, value, location); err == nil {
+			if !strings.Contains(layout, "2006") {
+				when = time.Date(now.Year(), when.Month(), when.Day(), when.Hour(), when.Minute(), 0, 0, location)
+				if when.Before(now) {
+					when = when.AddDate(1, 0, 0)
+				}
+			}
+			return when, nil
+		}
+	}
 	return time.Time{}, fmt.Errorf("invalid event time")
+}
+func parseClock(day time.Time, value string, location *time.Location) (time.Time, error) {
+	value = strings.ToUpper(strings.ReplaceAll(value, " ", ""))
+	for _, layout := range []string{"15:04", "3PM", "3:04PM"} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return time.Date(day.Year(), day.Month(), day.Day(), parsed.Hour(), parsed.Minute(), 0, 0, location), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("invalid clock")
 }
 func eventText(e event) string {
 	species := "Any species"
@@ -243,10 +343,21 @@ func (a *app) handleButton(i *discordgo.InteractionCreate) {
 		return
 	}
 	switch parts[0] {
+	case "create":
+		a.showCreateModal(i, parts[1])
 	case "join":
 		a.join(i, parts[1])
 	case "leave":
 		a.leave(i, parts[1])
+	}
+}
+func (a *app) replyWithComponents(i *discordgo.InteractionCreate, text string, components []discordgo.MessageComponent, ephemeral bool) {
+	flags := discordgo.MessageFlags(0)
+	if ephemeral {
+		flags = discordgo.MessageFlagsEphemeral
+	}
+	if err := a.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Content: text, Components: components, Flags: flags}}); err != nil {
+		slog.Error("respond to interaction", "error", err)
 	}
 }
 func (a *app) reply(i *discordgo.InteractionCreate, text string, ephemeral bool) {

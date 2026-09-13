@@ -19,6 +19,7 @@ type event struct {
 func migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	_, err := pool.Exec(ctx, `
 CREATE TABLE IF NOT EXISTS guild_settings (guild_id TEXT PRIMARY KEY, channel_id TEXT NOT NULL);
+ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT 'UTC';
 CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY,guild_id TEXT NOT NULL,creator_id TEXT NOT NULL,title TEXT NOT NULL,visibility TEXT NOT NULL CHECK (visibility IN ('public','private')),invite_code TEXT UNIQUE,game_server TEXT NOT NULL,species TEXT NOT NULL DEFAULT '',starts_at TIMESTAMPTZ NOT NULL,reminder_sent BOOLEAN NOT NULL DEFAULT FALSE,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
 CREATE TABLE IF NOT EXISTS event_participants (event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,user_id TEXT NOT NULL,is_creator BOOLEAN NOT NULL DEFAULT FALSE,PRIMARY KEY(event_id,user_id));
 CREATE INDEX IF NOT EXISTS events_active_idx ON events(guild_id,starts_at);`)
@@ -34,6 +35,15 @@ func randomHex(size int) (string, error) {
 func (a *app) setEventChannel(ctx context.Context, guildID, channelID string) error {
 	_, err := a.pool.Exec(ctx, `INSERT INTO guild_settings(guild_id,channel_id) VALUES($1,$2) ON CONFLICT(guild_id) DO UPDATE SET channel_id=EXCLUDED.channel_id`, guildID, channelID)
 	return err
+}
+func (a *app) setTimezone(ctx context.Context, guildID, timezone string) error {
+	_, err := a.pool.Exec(ctx, `INSERT INTO guild_settings(guild_id,channel_id,timezone) VALUES($1,'',$2) ON CONFLICT(guild_id) DO UPDATE SET timezone=EXCLUDED.timezone`, guildID, timezone)
+	return err
+}
+func (a *app) eventTimezone(ctx context.Context, guildID string) (string, error) {
+	var timezone string
+	err := a.pool.QueryRow(ctx, `SELECT timezone FROM guild_settings WHERE guild_id=$1`, guildID).Scan(&timezone)
+	return timezone, err
 }
 func (a *app) eventChannel(ctx context.Context, guildID string) (string, error) {
 	var id string

@@ -108,12 +108,14 @@ registry credentials.
 
 ## Event commands
 
-An administrator runs `/event configure-channel` once per server. Everyone can
-then use `/event create` with a title, their ISO-8601 local time including its
-UTC offset, visibility, Evrima server, and optional species. Public events are
-announced in the configured channel and appear in `/lfp`; their announcement
-has join and leave buttons. Slash-command fallbacks are `/event join` and
-`/event leave`.
+An administrator runs `/event configure-channel` and `/event configure-timezone`
+once per server. Everyone then uses `/event create`, chooses public or private,
+and completes a short form with a pack name, event time, Evrima server, and
+optional species. Event times use the configured server timezone and accept
+inputs such as `tomorrow 8pm`, `Friday 19:30`, and `2026-09-13 20:43`. Public
+events are announced in the configured channel and appear in `/lfp`; their
+announcement has join and leave buttons. Slash-command fallbacks are `/event
+join` and `/event leave`.
 
 Private events are not announced or listed. Their creator receives an invite
 code in a direct message, which players use with `/event join-private`. The
