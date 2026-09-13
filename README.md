@@ -137,7 +137,8 @@ voice channel's chat. Slash-command fallbacks are `/sessions join` and
 `/sessions leave`.
 
 Private play sessions are not announced or listed. Their host receives an invite
-code in a direct message, which players use with `/sessions join-private`. The
+code in the private creation response, which players use with `/sessions
+join-private`. The
 bot creates a temporary role for the host and participants; 15 minutes before
 the session, it creates a voice channel that only this role can view or join.
 The host can end the session with `/sessions end`. Its 15-minute reminder is

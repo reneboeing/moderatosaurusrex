@@ -110,12 +110,12 @@ func (a *app) showHelp(i *discordgo.InteractionCreate) {
 	a.reply(i, text(i,
 		"**Moderatosaurus Rex — play sessions**\n"+
 			"Use `/sessions browse` to find public roams and join from the list.\n"+
-			"Use `/sessions create` to host a public or private session. Public sessions open a voice channel 15 minutes before they begin. Private hosts receive an invite code by DM; players join with `/sessions join-private`.\n"+
+			"Use `/sessions create` to host a public or private session. Public sessions open a voice channel 15 minutes before they begin. Private hosts receive an invite code in the creation response; players join with `/sessions join-private`.\n"+
 			"Use `/sessions leave` to leave and `/sessions end` to end a session you host. Server administrators can end any session.\n"+
 			"Admins: use `/sessions configure-timezone` and `/sessions configure-category` once per server.",
 		"**Moderatosaurus Rex — Spielrunden**\n"+
 			"Mit `/sessions browse` findest du öffentliche Runden und kannst direkt aus der Liste beitreten.\n"+
-			"Mit `/sessions create` erstellst du eine öffentliche oder private Spielrunde. Für öffentliche Runden wird 15 Minuten vorher ein Sprachkanal geöffnet. Hosts privater Runden erhalten per DM einen Einladungscode; Spieler treten mit `/sessions join-private` bei.\n"+
+			"Mit `/sessions create` erstellst du eine öffentliche oder private Spielrunde. Für öffentliche Runden wird 15 Minuten vorher ein Sprachkanal geöffnet. Hosts privater Runden erhalten den Einladungscode in der Erstellungsantwort; Spieler treten mit `/sessions join-private` bei.\n"+
 			"Mit `/sessions leave` verlässt du eine Runde; mit `/sessions end` beendest du eine von dir gehostete Runde. Server-Administratoren können jede Runde beenden.\n"+
 			"Admins: `/sessions configure-timezone` und `/sessions configure-category` werden pro Server einmal eingerichtet."), true)
 }
@@ -252,17 +252,7 @@ func (a *app) create(i *discordgo.InteractionCreate, o map[string]string, visibi
 			a.editReply(i, "I could not assign the private session role. Ensure I have the Manage Roles permission, then try again.")
 			return
 		}
-		dm, err := a.session.UserChannelCreate(userID(i))
-		if err == nil {
-			_, err = a.session.ChannelMessageSend(dm.ID, "Your private **"+e.Title+"** play session is ready. Share invite code `"+e.InviteCode+"`. Participants join with `/sessions join-private` and the code.")
-		}
-		if err != nil {
-			_ = a.session.GuildRoleDelete(e.GuildID, e.RoleID)
-			_, _ = a.closeEvent(context.Background(), e.ID)
-			a.editReply(i, "I could not DM you the private invite code. Enable DMs from server members and try again.")
-			return
-		}
-		a.editReply(i, "I sent your private session invite code by DM.")
+		a.editReply(i, "Your private **"+e.Title+"** play session is ready. Share invite code `"+e.InviteCode+"`. Participants join with `/sessions join-private` and the code.")
 		return
 	}
 	a.editReply(i, "Your public play session is listed in `/sessions browse`. Its voice channel will open 15 minutes before it starts.")
@@ -277,6 +267,7 @@ func (a *app) createPrivateSessionVoiceChannel(e event, categoryID string) (*dis
 	return a.session.GuildChannelCreateComplex(e.GuildID, discordgo.GuildChannelCreateData{Name: voiceChannelName(e.Title), Type: discordgo.ChannelTypeGuildVoice, ParentID: categoryID, PermissionOverwrites: []*discordgo.PermissionOverwrite{
 		{ID: e.GuildID, Type: discordgo.PermissionOverwriteTypeRole, Deny: permissions},
 		{ID: e.RoleID, Type: discordgo.PermissionOverwriteTypeRole, Allow: permissions},
+		{ID: a.session.State.User.ID, Type: discordgo.PermissionOverwriteTypeMember, Allow: permissions},
 	}})
 }
 
@@ -429,9 +420,9 @@ func (a *app) joinEvent(i *discordgo.InteractionCreate, id string) {
 				return
 			}
 		}
-		if dm, err := a.session.UserChannelCreate(e.CreatorID); err == nil {
-			if _, err := a.session.ChannelMessageSend(dm.ID, "<@"+userID(i)+"> joined your private play session **"+e.Title+"**."); err != nil {
-				slog.Error("notify private session host", "error", err)
+		if e.VoiceChannelID != "" {
+			if _, err := a.session.ChannelMessageSend(e.VoiceChannelID, "<@"+e.CreatorID+"> <@"+userID(i)+"> joined **"+e.Title+"**."); err != nil {
+				slog.Error("announce private session participant", "error", err)
 			}
 		}
 	}
