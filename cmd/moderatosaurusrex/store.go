@@ -66,10 +66,7 @@ func (a *app) createEvent(ctx context.Context, e event) (event, error) {
 		}
 		e.InviteCode = "REX-" + code
 	}
-	var inviteCode any
-	if e.Visibility == "private" {
-		inviteCode = e.InviteCode
-	}
+	inviteCode := databaseInviteCode(e.Visibility, e.InviteCode)
 	tx, err := a.pool.Begin(ctx)
 	if err != nil {
 		return event{}, err
@@ -84,6 +81,13 @@ func (a *app) createEvent(ctx context.Context, e event) (event, error) {
 		return event{}, err
 	}
 	return e, tx.Commit(ctx)
+}
+
+func databaseInviteCode(visibility, inviteCode string) any {
+	if visibility == "private" {
+		return inviteCode
+	}
+	return nil
 }
 func scanEvent(row pgx.Row) (event, error) {
 	var e event
