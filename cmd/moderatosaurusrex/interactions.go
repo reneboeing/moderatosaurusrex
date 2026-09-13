@@ -19,7 +19,7 @@ func registerCommands(s *discordgo.Session, appID, guildID string) error {
 			{Name: "join", Description: "Join a public event.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "event_id", Description: "The event ID from /lfp.", Type: 3, Required: true}}},
 			{Name: "join-private", Description: "Join a private event by invite code.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "invite_code", Description: "Invite code from the creator.", Type: 3, Required: true}}},
 			{Name: "leave", Description: "Leave an event.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "event_id", Description: "The event ID.", Type: 3, Required: true}}},
-			{Name: "close", Description: "Close your event and remove it from /lfp.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "event_id", Description: "The event ID.", Type: 3, Required: true}}},
+			{Name: "close", Description: "Choose and close one of your events.", Type: 1},
 			{Name: "configure-channel", Description: "Set the channel for event announcements and reminders.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "channel", Description: "Channel for events and reminders.", Type: 7, Required: true}}},
 			{Name: "configure-timezone", Description: "Set the server event timezone, e.g. Europe/Berlin.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "timezone", Description: "IANA timezone, e.g. Europe/Berlin.", Type: 3, Required: true}}},
 		}},
@@ -87,7 +87,11 @@ func (a *app) handleCommand(i *discordgo.InteractionCreate) {
 	case "leave":
 		a.leave(i, opts["event_id"])
 	case "close":
-		a.close(i, opts["event_id"])
+		if opts["event_id"] != "" {
+			a.close(i, opts["event_id"])
+		} else {
+			a.showCloseEvents(i)
+		}
 	}
 }
 func (a *app) configure(i *discordgo.InteractionCreate, channel string) {
@@ -344,7 +348,30 @@ func (a *app) close(i *discordgo.InteractionCreate, id string) {
 	}
 	a.reply(i, "Your event is closed and no longer listed in /lfp.", true)
 }
+func (a *app) showCloseEvents(i *discordgo.InteractionCreate) {
+	events, err := a.creatorEvents(context.Background(), i.GuildID, userID(i))
+	if err != nil {
+		a.fail(i, err)
+		return
+	}
+	if len(events) == 0 {
+		a.reply(i, text(i, "You have no active events to close.", "Du hast keine aktiven Events zum Schließen."), true)
+		return
+	}
+	options := make([]discordgo.SelectMenuOption, 0, len(events))
+	for _, e := range events {
+		options = append(options, discordgo.SelectMenuOption{Label: e.Title, Value: e.ID, Description: e.StartsAt.Format("2006-01-02 15:04 UTC")})
+	}
+	a.replyWithComponents(i, text(i, "Choose an event to close:", "Wähle ein Event zum Schließen:"), []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.SelectMenu{CustomID: "close-select", Placeholder: text(i, "Select an event", "Event auswählen"), Options: options, MaxValues: 1}}}}, true)
+}
 func (a *app) handleButton(i *discordgo.InteractionCreate) {
+	if i.MessageComponentData().CustomID == "close-select" {
+		values := i.MessageComponentData().Values
+		if len(values) == 1 {
+			a.close(i, values[0])
+		}
+		return
+	}
 	parts := strings.Split(i.MessageComponentData().CustomID, ":")
 	if len(parts) != 2 {
 		return

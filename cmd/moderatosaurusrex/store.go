@@ -116,6 +116,22 @@ func (a *app) publicEvents(ctx context.Context, guildID string) ([]event, error)
 	}
 	return out, rows.Err()
 }
+func (a *app) creatorEvents(ctx context.Context, guildID, creatorID string) ([]event, error) {
+	rows, err := a.pool.Query(ctx, `SELECT id,guild_id,creator_id,title,visibility,COALESCE(invite_code,''),game_server,species,starts_at FROM events WHERE guild_id=$1 AND creator_id=$2 ORDER BY starts_at LIMIT 25`, guildID, creatorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []event
+	for rows.Next() {
+		e, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
 func (a *app) enrollEvent(ctx context.Context, eventID, userID string) (bool, error) {
 	var joined bool
 	err := a.pool.QueryRow(ctx, `INSERT INTO event_participants(event_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING true`, eventID, userID).Scan(&joined)
