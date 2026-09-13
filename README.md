@@ -110,8 +110,8 @@ registry credentials.
 
 An administrator runs `/event configure-channel` and `/event configure-timezone`
 once per server. Everyone then uses `/event create`, chooses public or private,
-and completes a short form with a pack name, event time, Evrima server, and
-optional species. Event times use the configured server timezone and accept
+and completes a short form with a pack name, event time, optional Evrima server,
+and optional species. Event times use the configured server timezone and accept
 inputs such as `tomorrow 8pm`, `Friday 19:30`, and `2026-09-13 20:43`. Public
 events are announced in the configured channel and appear in `/lfp`; their
 announcement has join and leave buttons. Slash-command fallbacks are `/event

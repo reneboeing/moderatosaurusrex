@@ -130,7 +130,7 @@ func (a *app) showCreateModal(i *discordgo.InteractionCreate, visibility string)
 	err := a.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseModal, Data: &discordgo.InteractionResponseData{CustomID: "event-create:" + visibility, Title: text(i, "Create pack event", "Pack-Event erstellen"), Components: []discordgo.MessageComponent{
 		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "title", Label: text(i, "Pack name", "Pack-Name"), Style: discordgo.TextInputShort, Required: true, MaxLength: 100}}},
 		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "when", Label: text(i, "When (server timezone)", "Wann (Server-Zeitzone)"), Style: discordgo.TextInputShort, Placeholder: text(i, "tomorrow 8pm, Friday 19:30, or 2026-09-13 20:43", "morgen 20 Uhr, Freitag 19:30 oder 2026-09-13 20:43"), Required: true, MaxLength: 64}}},
-		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "server", Label: text(i, "Evrima server", "Evrima-Server"), Style: discordgo.TextInputShort, Required: true, MaxLength: 100}}},
+		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "server", Label: text(i, "Evrima server (optional)", "Evrima-Server (optional)"), Style: discordgo.TextInputShort, Required: false, MaxLength: 100}}},
 		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "species", Label: text(i, "Desired species (optional)", "Gewünschte Spezies (optional)"), Style: discordgo.TextInputShort, Required: false, MaxLength: 100}}},
 	}}})
 	if err != nil {
@@ -269,10 +269,14 @@ func parseClock(day time.Time, value string, location *time.Location) (time.Time
 }
 func eventText(e event) string {
 	species := "Any species"
+	server := "No server preference"
 	if e.Species != "" {
 		species = e.Species
 	}
-	return fmt.Sprintf("**%s**\nStarts <t:%d:F> (<t:%d:R>)\nServer: %s · Species: %s\nEvent ID: `%s`", e.Title, e.StartsAt.Unix(), e.StartsAt.Unix(), e.GameServer, species, e.ID)
+	if e.GameServer != "" {
+		server = e.GameServer
+	}
+	return fmt.Sprintf("**%s**\nStarts <t:%d:F> (<t:%d:R>)\nServer: %s · Species: %s\nSession ID: `%s`", e.Title, e.StartsAt.Unix(), e.StartsAt.Unix(), server, species, e.ID)
 }
 func (a *app) list(i *discordgo.InteractionCreate) {
 	events, err := a.publicEvents(context.Background(), i.GuildID)
@@ -281,7 +285,7 @@ func (a *app) list(i *discordgo.InteractionCreate) {
 		return
 	}
 	if len(events) == 0 {
-		a.reply(i, text(i, "No public packs are looking for players right now.", "Zurzeit suchen keine öffentlichen Packs nach Spielern."), true)
+		a.reply(i, text(i, "There are no upcoming public play sessions.", "Es gibt keine kommenden öffentlichen Spielrunden."), true)
 		return
 	}
 	lines := make([]string, 0, len(events))
@@ -290,7 +294,7 @@ func (a *app) list(i *discordgo.InteractionCreate) {
 		lines = append(lines, eventText(e))
 		options = append(options, discordgo.SelectMenuOption{Label: e.Title, Value: e.ID, Description: e.StartsAt.Format("2006-01-02 15:04 UTC")})
 	}
-	a.replyWithComponents(i, "**"+text(i, "Looking for pack", "Suche nach Pack")+"**\n\n"+strings.Join(lines, "\n\n"), []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.SelectMenu{CustomID: "join-select", Placeholder: text(i, "Choose a pack to join", "Wähle ein Pack zum Beitreten"), Options: options, MaxValues: 1}}}}, true)
+	a.replyWithComponents(i, "**"+text(i, "Upcoming play sessions", "Kommende Spielrunden")+"**\n\n"+strings.Join(lines, "\n\n"), []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.SelectMenu{CustomID: "join-select", Placeholder: text(i, "Choose a play session to join", "Wähle eine Spielrunde zum Beitreten"), Options: options, MaxValues: 1}}}}, true)
 }
 func (a *app) showJoinEvents(i *discordgo.InteractionCreate) { a.list(i) }
 func (a *app) joinPrivate(i *discordgo.InteractionCreate, code string) {
