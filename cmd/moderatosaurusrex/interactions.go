@@ -11,17 +11,28 @@ import (
 )
 
 func registerCommands(s *discordgo.Session, appID, guildID string) error {
+	previous, err := s.ApplicationCommands(appID, guildID)
+	if err != nil {
+		return err
+	}
+	for _, command := range previous {
+		if command.Name == "lfp" || command.Name == "event" {
+			if err := s.ApplicationCommandDelete(appID, guildID, command.ID); err != nil {
+				return err
+			}
+		}
+	}
 	commands := []*discordgo.ApplicationCommand{
 		{Name: "ping", Description: "Check whether Moderatosaurus Rex is online."},
-		{Name: "lfp", Description: "List public packs looking for players."},
-		{Name: "event", Description: "Create and manage pack events.", Options: []*discordgo.ApplicationCommandOption{
-			{Name: "create", Description: "Open the guided event form.", Type: discordgo.ApplicationCommandOptionSubCommand},
-			{Name: "join", Description: "Choose a public event to join.", Type: 1},
-			{Name: "join-private", Description: "Enter a private-event invite code.", Type: 1},
-			{Name: "leave", Description: "Choose an event to leave.", Type: 1},
-			{Name: "close", Description: "Choose and close one of your events.", Type: 1},
-			{Name: "configure-channel", Description: "Set the channel for event announcements and reminders.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "channel", Description: "Channel for events and reminders.", Type: 7, Required: true}}},
-			{Name: "configure-timezone", Description: "Set the server event timezone, e.g. Europe/Berlin.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "timezone", Description: "IANA timezone, e.g. Europe/Berlin.", Type: 3, Required: true}}},
+		{Name: "sessions", Description: "Host, find, and manage Evrima play sessions.", Options: []*discordgo.ApplicationCommandOption{
+			{Name: "browse", Description: "Browse public play sessions.", Type: discordgo.ApplicationCommandOptionSubCommand},
+			{Name: "create", Description: "Open the guided play-session form.", Type: 1},
+			{Name: "join", Description: "Choose a public play session to join.", Type: 1},
+			{Name: "join-private", Description: "Enter a private-session invite code.", Type: 1},
+			{Name: "leave", Description: "Choose a play session to leave.", Type: 1},
+			{Name: "end", Description: "Choose and end one of your hosted sessions.", Type: 1},
+			{Name: "configure-channel", Description: "Set the channel for session announcements and reminders.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "channel", Description: "Channel for sessions and reminders.", Type: 7, Required: true}}},
+			{Name: "configure-timezone", Description: "Set the server session timezone, e.g. Europe/Berlin.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "timezone", Description: "IANA timezone, e.g. Europe/Berlin.", Type: 3, Required: true}}},
 		}},
 	}
 	for _, c := range commands {
@@ -61,11 +72,7 @@ func (a *app) handleCommand(i *discordgo.InteractionCreate) {
 		a.reply(i, "This command can only be used in a server.", true)
 		return
 	}
-	if d.Name == "lfp" {
-		a.list(i)
-		return
-	}
-	if d.Name != "event" || len(d.Options) == 0 {
+	if d.Name != "sessions" || len(d.Options) == 0 {
 		return
 	}
 	sub := d.Options[0]
@@ -74,6 +81,8 @@ func (a *app) handleCommand(i *discordgo.InteractionCreate) {
 		opts[o.Name] = fmt.Sprint(o.Value)
 	}
 	switch sub.Name {
+	case "browse":
+		a.list(i)
 	case "configure-channel":
 		a.configure(i, opts["channel"])
 	case "configure-timezone":
@@ -86,7 +95,7 @@ func (a *app) handleCommand(i *discordgo.InteractionCreate) {
 		a.showPrivateJoinModal(i)
 	case "leave":
 		a.showLeaveEvents(i)
-	case "close":
+	case "end":
 		if opts["event_id"] != "" {
 			a.close(i, opts["event_id"])
 		} else {
@@ -96,18 +105,18 @@ func (a *app) handleCommand(i *discordgo.InteractionCreate) {
 }
 func (a *app) configure(i *discordgo.InteractionCreate, channel string) {
 	if i.Member == nil || i.Member.Permissions&discordgo.PermissionManageServer == 0 {
-		a.reply(i, "You need the Manage Server permission to configure the event channel.", true)
+		a.reply(i, "You need the Manage Server permission to configure the session channel.", true)
 		return
 	}
 	if err := a.setEventChannel(context.Background(), i.GuildID, channel); err != nil {
 		a.fail(i, err)
 		return
 	}
-	a.reply(i, text(i, "Event announcements and reminders will be sent to <#"+channel+">.", "Event-Ankündigungen und Erinnerungen werden in <#"+channel+"> gesendet."), true)
+	a.reply(i, text(i, "Session announcements and reminders will be sent to <#"+channel+">.", "Ankündigungen und Erinnerungen für Spielrunden werden in <#"+channel+"> gesendet."), true)
 }
 func (a *app) configureTimezone(i *discordgo.InteractionCreate, timezone string) {
 	if i.Member == nil || i.Member.Permissions&discordgo.PermissionManageServer == 0 {
-		a.reply(i, text(i, "You need the Manage Server permission to configure the event timezone.", "Du benötigst die Berechtigung „Server verwalten“, um die Event-Zeitzone einzurichten."), true)
+		a.reply(i, text(i, "You need the Manage Server permission to configure the session timezone.", "Du benötigst die Berechtigung „Server verwalten“, um die Zeitzone für Spielrunden einzurichten."), true)
 		return
 	}
 	if _, err := time.LoadLocation(timezone); err != nil {
@@ -118,23 +127,23 @@ func (a *app) configureTimezone(i *discordgo.InteractionCreate, timezone string)
 		a.fail(i, err)
 		return
 	}
-	a.reply(i, text(i, "Event times for this server now use `"+timezone+"`.", "Event-Zeiten für diesen Server verwenden jetzt `"+timezone+"`."), true)
+	a.reply(i, text(i, "Play-session times for this server now use `"+timezone+"`.", "Zeiten für Spielrunden verwenden jetzt `"+timezone+"`."), true)
 }
 func (a *app) showCreateChoice(i *discordgo.InteractionCreate) {
-	a.replyWithComponents(i, text(i, "Choose who can discover this event:", "Wähle, wer dieses Event finden kann:"), []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-		discordgo.Button{Label: text(i, "Public event", "Öffentliches Event"), Style: discordgo.PrimaryButton, CustomID: "create:public"},
-		discordgo.Button{Label: text(i, "Private event", "Privates Event"), Style: discordgo.SecondaryButton, CustomID: "create:private"},
+	a.replyWithComponents(i, text(i, "Who can discover this play session?", "Wer kann diese Spielrunde finden?"), []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+		discordgo.Button{Label: text(i, "Public session", "Öffentliche Spielrunde"), Style: discordgo.PrimaryButton, CustomID: "create:public"},
+		discordgo.Button{Label: text(i, "Private session", "Private Spielrunde"), Style: discordgo.SecondaryButton, CustomID: "create:private"},
 	}}}, true)
 }
 func (a *app) showCreateModal(i *discordgo.InteractionCreate, visibility string) {
-	err := a.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseModal, Data: &discordgo.InteractionResponseData{CustomID: "event-create:" + visibility, Title: text(i, "Create pack event", "Pack-Event erstellen"), Components: []discordgo.MessageComponent{
-		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "title", Label: text(i, "Pack name", "Pack-Name"), Style: discordgo.TextInputShort, Required: true, MaxLength: 100}}},
+	err := a.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseModal, Data: &discordgo.InteractionResponseData{CustomID: "session-create:" + visibility, Title: text(i, "Host a play session", "Spielrunde erstellen"), Components: []discordgo.MessageComponent{
+		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "title", Label: text(i, "Session name", "Name der Spielrunde"), Style: discordgo.TextInputShort, Required: true, MaxLength: 100}}},
 		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "when", Label: text(i, "When (server timezone)", "Wann (Server-Zeitzone)"), Style: discordgo.TextInputShort, Placeholder: text(i, "tomorrow 8pm, Friday 19:30, or 2026-09-13 20:43", "morgen 20 Uhr, Freitag 19:30 oder 2026-09-13 20:43"), Required: true, MaxLength: 64}}},
 		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "server", Label: text(i, "Evrima server (optional)", "Evrima-Server (optional)"), Style: discordgo.TextInputShort, Required: false, MaxLength: 100}}},
 		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "species", Label: text(i, "Desired species (optional)", "Gewünschte Spezies (optional)"), Style: discordgo.TextInputShort, Required: false, MaxLength: 100}}},
 	}}})
 	if err != nil {
-		slog.Error("open event form", "error", err)
+		slog.Error("open session form", "error", err)
 	}
 }
 func modalValues(i *discordgo.InteractionCreate) map[string]string {
@@ -154,25 +163,25 @@ func (a *app) handleModal(i *discordgo.InteractionCreate) {
 		a.joinPrivate(i, strings.ToUpper(modalValues(i)["invite_code"]))
 		return
 	}
-	if len(parts) != 2 || parts[0] != "event-create" {
+	if len(parts) != 2 || parts[0] != "session-create" {
 		return
 	}
 	a.create(i, modalValues(i), parts[1])
 }
 func (a *app) showPrivateJoinModal(i *discordgo.InteractionCreate) {
-	err := a.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseModal, Data: &discordgo.InteractionResponseData{CustomID: "private-join", Title: text(i, "Join private event", "Privatem Event beitreten"), Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "invite_code", Label: text(i, "Invite code", "Einladungscode"), Placeholder: "REX-1234abcd", Style: discordgo.TextInputShort, Required: true, MaxLength: 32}}}}}})
+	err := a.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseModal, Data: &discordgo.InteractionResponseData{CustomID: "private-join", Title: text(i, "Join private session", "Privater Spielrunde beitreten"), Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "invite_code", Label: text(i, "Invite code", "Einladungscode"), Placeholder: "REX-1234abcd", Style: discordgo.TextInputShort, Required: true, MaxLength: 32}}}}}})
 	if err != nil {
 		slog.Error("open private join form", "error", err)
 	}
 }
 func (a *app) create(i *discordgo.InteractionCreate, o map[string]string, visibility string) {
 	if channel, err := a.eventChannel(context.Background(), i.GuildID); err != nil || channel == "" {
-		a.reply(i, "An administrator must first run `/event configure-channel`.", true)
+		a.reply(i, "An administrator must first run `/sessions configure-channel`.", true)
 		return
 	}
 	timezone, err := a.eventTimezone(context.Background(), i.GuildID)
 	if err != nil {
-		a.reply(i, "An administrator must first run `/event configure-timezone`.", true)
+		a.reply(i, "An administrator must first run `/sessions configure-timezone`.", true)
 		return
 	}
 	location, err := time.LoadLocation(timezone)
@@ -186,7 +195,7 @@ func (a *app) create(i *discordgo.InteractionCreate, o map[string]string, visibi
 		return
 	}
 	if when.Before(time.Now()) {
-		a.reply(i, "The event time must be in the future.", true)
+		a.reply(i, "The play-session time must be in the future.", true)
 		return
 	}
 	e, err := a.createEvent(context.Background(), event{GuildID: i.GuildID, CreatorID: userID(i), Title: o["title"], Visibility: visibility, GameServer: o["server"], Species: o["species"], StartsAt: when.UTC()})
@@ -197,22 +206,22 @@ func (a *app) create(i *discordgo.InteractionCreate, o map[string]string, visibi
 	if e.Visibility == "private" {
 		dm, err := a.session.UserChannelCreate(userID(i))
 		if err == nil {
-			_, err = a.session.ChannelMessageSend(dm.ID, "Your private **"+e.Title+"** event is ready. Share invite code `"+e.InviteCode+"`. Participants join with `/event join-private invite_code:"+e.InviteCode+"`.")
+			_, err = a.session.ChannelMessageSend(dm.ID, "Your private **"+e.Title+"** play session is ready. Share invite code `"+e.InviteCode+"`. Participants join with `/sessions join-private` and the code.")
 		}
 		if err != nil {
 			a.reply(i, "I could not DM you the private invite code. Enable DMs from server members and try again.", true)
 			return
 		}
-		a.reply(i, "I sent your private event invite code by DM.", true)
+		a.reply(i, "I sent your private session invite code by DM.", true)
 		return
 	}
 	channel, _ := a.eventChannel(context.Background(), i.GuildID)
-	_, err = a.session.ChannelMessageSendComplex(channel, &discordgo.MessageSend{Content: eventText(e), Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.Button{Label: "Join pack", Style: discordgo.PrimaryButton, CustomID: "join:" + e.ID}, discordgo.Button{Label: "Leave pack", Style: discordgo.SecondaryButton, CustomID: "leave:" + e.ID}}}}})
+	_, err = a.session.ChannelMessageSendComplex(channel, &discordgo.MessageSend{Content: eventText(e), Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.Button{Label: "Join session", Style: discordgo.PrimaryButton, CustomID: "join:" + e.ID}, discordgo.Button{Label: "Leave session", Style: discordgo.SecondaryButton, CustomID: "leave:" + e.ID}}}}})
 	if err != nil {
 		a.fail(i, err)
 		return
 	}
-	a.reply(i, "Your public event is live in the configured event channel.", true)
+	a.reply(i, "Your public play session is live in the configured session channel.", true)
 }
 
 func parseEventTime(value string, location *time.Location) (time.Time, error) {
@@ -276,7 +285,7 @@ func eventText(e event) string {
 	if e.GameServer != "" {
 		server = e.GameServer
 	}
-	return fmt.Sprintf("**%s**\nStarts <t:%d:F> (<t:%d:R>)\nServer: %s · Species: %s\nSession ID: `%s`", e.Title, e.StartsAt.Unix(), e.StartsAt.Unix(), server, species, e.ID)
+	return fmt.Sprintf("**%s**\nHosted by <@%s>\nRoam begins <t:%d:F> (<t:%d:R>)\nEvrima server: %s · Species: %s\nSession ID: `%s`", e.Title, e.CreatorID, e.StartsAt.Unix(), e.StartsAt.Unix(), server, species, e.ID)
 }
 func (a *app) list(i *discordgo.InteractionCreate) {
 	events, err := a.publicEvents(context.Background(), i.GuildID)
@@ -300,7 +309,7 @@ func (a *app) showJoinEvents(i *discordgo.InteractionCreate) { a.list(i) }
 func (a *app) joinPrivate(i *discordgo.InteractionCreate, code string) {
 	e, err := a.eventByCode(context.Background(), i.GuildID, code)
 	if err != nil {
-		a.reply(i, "That private invite code is invalid or the event has closed.", true)
+		a.reply(i, "That private invite code is invalid or the session has ended.", true)
 		return
 	}
 	a.joinEvent(i, e.ID)
@@ -308,11 +317,11 @@ func (a *app) joinPrivate(i *discordgo.InteractionCreate, code string) {
 func (a *app) join(i *discordgo.InteractionCreate, id string) {
 	e, err := a.eventByID(context.Background(), i.GuildID, id)
 	if err != nil {
-		a.reply(i, "That event no longer exists.", true)
+		a.reply(i, "That play session no longer exists.", true)
 		return
 	}
 	if e.Visibility != "public" {
-		a.reply(i, "Use `/event join-private` with the invite code for private events.", true)
+		a.reply(i, "Use `/sessions join-private` with the invite code for private sessions.", true)
 		return
 	}
 	a.joinEvent(i, e.ID)
@@ -320,7 +329,7 @@ func (a *app) join(i *discordgo.InteractionCreate, id string) {
 func (a *app) joinEvent(i *discordgo.InteractionCreate, id string) {
 	e, err := a.eventByID(context.Background(), i.GuildID, id)
 	if err != nil {
-		a.reply(i, "That event no longer exists.", true)
+		a.reply(i, "That play session no longer exists.", true)
 		return
 	}
 	joined, err := a.enrollEvent(context.Background(), id, userID(i))
@@ -329,7 +338,7 @@ func (a *app) joinEvent(i *discordgo.InteractionCreate, id string) {
 		return
 	}
 	if !joined {
-		a.reply(i, "You are already in this pack.", true)
+		a.reply(i, "You are already in this play session.", true)
 		return
 	}
 	channel, err := a.eventChannel(context.Background(), i.GuildID)
@@ -348,10 +357,10 @@ func (a *app) leave(i *discordgo.InteractionCreate, id string) {
 		return
 	}
 	if !left {
-		a.reply(i, "You are not a participant, or you are the creator. Creators can use `/event close`.", true)
+		a.reply(i, "You are not a participant, or you are the host. Hosts can use `/sessions end`.", true)
 		return
 	}
-	a.reply(i, "You left the event.", true)
+	a.reply(i, "You left the play session.", true)
 }
 func (a *app) showLeaveEvents(i *discordgo.InteractionCreate) {
 	events, err := a.participantEvents(context.Background(), i.GuildID, userID(i))
@@ -360,14 +369,14 @@ func (a *app) showLeaveEvents(i *discordgo.InteractionCreate) {
 		return
 	}
 	if len(events) == 0 {
-		a.reply(i, text(i, "You have no events to leave.", "Du hast keine Events zum Verlassen."), true)
+		a.reply(i, text(i, "You have no play sessions to leave.", "Du hast keine Spielrunden zum Verlassen."), true)
 		return
 	}
 	options := make([]discordgo.SelectMenuOption, 0, len(events))
 	for _, e := range events {
 		options = append(options, discordgo.SelectMenuOption{Label: e.Title, Value: e.ID, Description: e.StartsAt.Format("2006-01-02 15:04 UTC")})
 	}
-	a.replyWithComponents(i, text(i, "Choose an event to leave:", "Wähle ein Event zum Verlassen:"), []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.SelectMenu{CustomID: "leave-select", Placeholder: text(i, "Select an event", "Event auswählen"), Options: options, MaxValues: 1}}}}, true)
+	a.replyWithComponents(i, text(i, "Choose a play session to leave:", "Wähle eine Spielrunde zum Verlassen:"), []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.SelectMenu{CustomID: "leave-select", Placeholder: text(i, "Select a play session", "Spielrunde auswählen"), Options: options, MaxValues: 1}}}}, true)
 }
 func (a *app) close(i *discordgo.InteractionCreate, id string) {
 	closed, err := a.closeEvent(context.Background(), id, userID(i))
@@ -376,10 +385,10 @@ func (a *app) close(i *discordgo.InteractionCreate, id string) {
 		return
 	}
 	if !closed {
-		a.reply(i, "Only the event creator can close an active event.", true)
+		a.reply(i, "Only the session host can end an active play session.", true)
 		return
 	}
-	a.reply(i, "Your event is closed and no longer listed in /lfp.", true)
+	a.reply(i, "Your play session has ended and is no longer listed in `/sessions browse`.", true)
 }
 func (a *app) showCloseEvents(i *discordgo.InteractionCreate) {
 	events, err := a.creatorEvents(context.Background(), i.GuildID, userID(i))
@@ -388,14 +397,14 @@ func (a *app) showCloseEvents(i *discordgo.InteractionCreate) {
 		return
 	}
 	if len(events) == 0 {
-		a.reply(i, text(i, "You have no active events to close.", "Du hast keine aktiven Events zum Schließen."), true)
+		a.reply(i, text(i, "You have no active play sessions to end.", "Du hast keine aktiven Spielrunden zum Beenden."), true)
 		return
 	}
 	options := make([]discordgo.SelectMenuOption, 0, len(events))
 	for _, e := range events {
 		options = append(options, discordgo.SelectMenuOption{Label: e.Title, Value: e.ID, Description: e.StartsAt.Format("2006-01-02 15:04 UTC")})
 	}
-	a.replyWithComponents(i, text(i, "Choose an event to close:", "Wähle ein Event zum Schließen:"), []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.SelectMenu{CustomID: "close-select", Placeholder: text(i, "Select an event", "Event auswählen"), Options: options, MaxValues: 1}}}}, true)
+	a.replyWithComponents(i, text(i, "Choose a play session to end:", "Wähle eine Spielrunde zum Beenden:"), []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.SelectMenu{CustomID: "close-select", Placeholder: text(i, "Select a play session", "Spielrunde auswählen"), Options: options, MaxValues: 1}}}}, true)
 }
 func (a *app) handleButton(i *discordgo.InteractionCreate) {
 	if i.MessageComponentData().CustomID == "close-select" {

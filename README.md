@@ -121,20 +121,20 @@ network ports. If the GHCR package is private, configure GitHub Container
 Registry credentials in Portainer before deploying; public packages need no
 registry credentials.
 
-## Event commands
+## Play sessions
 
-An administrator runs `/event configure-channel` and `/event configure-timezone`
-once per server. Everyone then uses `/event create`, chooses public or private,
-and completes a short form with a pack name, event time, optional Evrima server,
-and optional species. Event times use the configured server timezone and accept
+An administrator runs `/sessions configure-channel` and `/sessions configure-timezone`
+once per server. Everyone then uses `/sessions create`, chooses public or private,
+and completes a short form with a session name, start time, optional Evrima server,
+and optional species. Play-session times use the configured server timezone and accept
 inputs such as `tomorrow 8pm`, `Friday 19:30`, and `2026-09-13 20:43`. Public
-events are announced in the configured channel and appear in `/lfp`; their
-announcement has join and leave buttons. Slash-command fallbacks are `/event
-join` and `/event leave`.
+play sessions are announced in the configured channel and appear in `/sessions
+browse`; their announcement has join and leave buttons. Slash-command fallbacks
+are `/sessions join` and `/sessions leave`.
 
-Private events are not announced or listed. Their creator receives an invite
-code in a direct message, which players use with `/event join-private`. The
-creator is automatically a participant and can end the event with `/event
-close`. A 15-minute reminder mentions all participants in the configured
-channel. Events remain active after starting and are deleted when closed or
-eight hours after their start time.
+Private play sessions are not announced or listed. Their host receives an invite
+code in a direct message, which players use with `/sessions join-private`. The
+host is automatically a participant and can end the session with `/sessions
+end`. A 15-minute reminder mentions all participants in the configured channel.
+Sessions remain active after starting and are deleted when ended or eight hours
+after their start time.
