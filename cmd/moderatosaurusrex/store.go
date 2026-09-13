@@ -133,6 +133,22 @@ func (a *app) creatorEvents(ctx context.Context, guildID, creatorID string) ([]e
 	}
 	return out, rows.Err()
 }
+func (a *app) activeEvents(ctx context.Context, guildID string) ([]event, error) {
+	rows, err := a.pool.Query(ctx, `SELECT id,guild_id,creator_id,title,visibility,COALESCE(invite_code,''),game_server,species,voice_channel_id,starts_at FROM events WHERE guild_id=$1 ORDER BY starts_at LIMIT 25`, guildID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []event
+	for rows.Next() {
+		e, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
 func (a *app) participantEvents(ctx context.Context, guildID, userID string) ([]event, error) {
 	rows, err := a.pool.Query(ctx, `SELECT e.id,e.guild_id,e.creator_id,e.title,e.visibility,COALESCE(e.invite_code,''),e.game_server,e.species,e.voice_channel_id,e.starts_at FROM events e JOIN event_participants p ON p.event_id=e.id WHERE e.guild_id=$1 AND p.user_id=$2 AND p.is_creator=false ORDER BY e.starts_at LIMIT 25`, guildID, userID)
 	if err != nil {

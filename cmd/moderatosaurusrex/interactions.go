@@ -31,7 +31,7 @@ func registerCommands(s *discordgo.Session, appID, guildID string) error {
 			{Name: "join", Description: "Choose a public play session to join.", Type: 1},
 			{Name: "join-private", Description: "Enter a private-session invite code.", Type: 1},
 			{Name: "leave", Description: "Choose a play session to leave.", Type: 1},
-			{Name: "end", Description: "Choose and end one of your hosted sessions.", Type: 1},
+			{Name: "end", Description: "End a hosted session; admins may end any session.", Type: 1},
 			{Name: "configure-category", Description: "Set the category for public session voice channels.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "category", Description: "Category for public session voice channels.", Type: 7, ChannelTypes: []discordgo.ChannelType{discordgo.ChannelTypeGuildCategory}, Required: true}}},
 			{Name: "configure-timezone", Description: "Set the server session timezone, e.g. Europe/Berlin.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "timezone", Description: "IANA timezone, e.g. Europe/Berlin.", Type: 3, Required: true}}},
 		}},
@@ -111,12 +111,12 @@ func (a *app) showHelp(i *discordgo.InteractionCreate) {
 		"**Moderatosaurus Rex — play sessions**\n"+
 			"Use `/sessions browse` to find public roams and join from the list.\n"+
 			"Use `/sessions create` to host a public or private session. Public sessions open a voice channel 15 minutes before they begin. Private hosts receive an invite code by DM; players join with `/sessions join-private`.\n"+
-			"Use `/sessions leave` to leave and `/sessions end` to end a session you host.\n"+
+			"Use `/sessions leave` to leave and `/sessions end` to end a session you host. Server administrators can end any session.\n"+
 			"Admins: use `/sessions configure-timezone` and `/sessions configure-category` once per server.",
 		"**Moderatosaurus Rex — Spielrunden**\n"+
 			"Mit `/sessions browse` findest du öffentliche Runden und kannst direkt aus der Liste beitreten.\n"+
 			"Mit `/sessions create` erstellst du eine öffentliche oder private Spielrunde. Für öffentliche Runden wird 15 Minuten vorher ein Sprachkanal geöffnet. Hosts privater Runden erhalten per DM einen Einladungscode; Spieler treten mit `/sessions join-private` bei.\n"+
-			"Mit `/sessions leave` verlässt du eine Runde; mit `/sessions end` beendest du eine von dir gehostete Runde.\n"+
+			"Mit `/sessions leave` verlässt du eine Runde; mit `/sessions end` beendest du eine von dir gehostete Runde. Server-Administratoren können jede Runde beenden.\n"+
 			"Admins: `/sessions configure-timezone` und `/sessions configure-category` werden pro Server einmal eingerichtet."), true)
 }
 func (a *app) configureCategory(i *discordgo.InteractionCreate, category string) {
@@ -435,8 +435,8 @@ func (a *app) close(i *discordgo.InteractionCreate, id string) {
 		a.reply(i, "That play session no longer exists.", true)
 		return
 	}
-	if e.CreatorID != userID(i) {
-		a.reply(i, "Only the session host can end an active play session.", true)
+	if e.CreatorID != userID(i) && !canManageSessions(i) {
+		a.reply(i, "Only the session host or a server administrator can end an active play session.", true)
 		return
 	}
 	if e.VoiceChannelID != "" {
@@ -457,13 +457,21 @@ func (a *app) close(i *discordgo.InteractionCreate, id string) {
 	a.reply(i, "Your play session has ended and is no longer listed in `/sessions browse`.", true)
 }
 func (a *app) showCloseEvents(i *discordgo.InteractionCreate) {
-	events, err := a.creatorEvents(context.Background(), i.GuildID, userID(i))
+	var (
+		events []event
+		err    error
+	)
+	if canManageSessions(i) {
+		events, err = a.activeEvents(context.Background(), i.GuildID)
+	} else {
+		events, err = a.creatorEvents(context.Background(), i.GuildID, userID(i))
+	}
 	if err != nil {
 		a.fail(i, err)
 		return
 	}
 	if len(events) == 0 {
-		a.reply(i, text(i, "You have no active play sessions to end.", "Du hast keine aktiven Spielrunden zum Beenden."), true)
+		a.reply(i, text(i, "There are no active play sessions to end.", "Es gibt keine aktiven Spielrunden zum Beenden."), true)
 		return
 	}
 	options := make([]discordgo.SelectMenuOption, 0, len(events))
@@ -471,6 +479,9 @@ func (a *app) showCloseEvents(i *discordgo.InteractionCreate) {
 		options = append(options, discordgo.SelectMenuOption{Label: e.Title, Value: e.ID, Description: e.StartsAt.Format("2006-01-02 15:04 UTC")})
 	}
 	a.replyWithComponents(i, text(i, "Choose a play session to end:", "Wähle eine Spielrunde zum Beenden:"), []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.SelectMenu{CustomID: "close-select", Placeholder: text(i, "Select a play session", "Spielrunde auswählen"), Options: options, MaxValues: 1}}}}, true)
+}
+func canManageSessions(i *discordgo.InteractionCreate) bool {
+	return i.Member != nil && i.Member.Permissions&discordgo.PermissionManageServer != 0
 }
 func (a *app) handleButton(i *discordgo.InteractionCreate) {
 	if i.MessageComponentData().CustomID == "close-select" {

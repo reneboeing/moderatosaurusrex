@@ -142,3 +142,4 @@ host is automatically a participant and can end the session with `/sessions
 end`. Its 15-minute reminder is sent directly to every participant. Sessions
 remain active after starting and are deleted when ended or eight hours after
 their start time; associated public voice channels are deleted at the same time.
+The host or a server administrator can end a session at any time.
