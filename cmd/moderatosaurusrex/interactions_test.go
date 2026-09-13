@@ -24,3 +24,11 @@ func TestParseEventTimeRelative(t *testing.T) {
 		t.Fatalf("parseClock(8pm) = %s, %v", got, err)
 	}
 }
+
+func TestParseEventTimeGermanRelative(t *testing.T) {
+	location := time.FixedZone("UTC+2", 2*60*60)
+	got, err := parseEventTime("morgen 20 uhr", location)
+	if err != nil || got.Hour() != 20 {
+		t.Fatalf("parseEventTime(morgen 20 uhr) = %s, %v", got, err)
+	}
+}

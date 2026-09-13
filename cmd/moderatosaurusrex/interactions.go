@@ -99,35 +99,35 @@ func (a *app) configure(i *discordgo.InteractionCreate, channel string) {
 		a.fail(i, err)
 		return
 	}
-	a.reply(i, "Event announcements and reminders will be sent to <#"+channel+">.", true)
+	a.reply(i, text(i, "Event announcements and reminders will be sent to <#"+channel+">.", "Event-Ankündigungen und Erinnerungen werden in <#"+channel+"> gesendet."), true)
 }
 func (a *app) configureTimezone(i *discordgo.InteractionCreate, timezone string) {
 	if i.Member == nil || i.Member.Permissions&discordgo.PermissionManageServer == 0 {
-		a.reply(i, "You need the Manage Server permission to configure the event timezone.", true)
+		a.reply(i, text(i, "You need the Manage Server permission to configure the event timezone.", "Du benötigst die Berechtigung „Server verwalten“, um die Event-Zeitzone einzurichten."), true)
 		return
 	}
 	if _, err := time.LoadLocation(timezone); err != nil {
-		a.reply(i, "Use an IANA timezone such as `Europe/Berlin` or `America/New_York`.", true)
+		a.reply(i, text(i, "Use an IANA timezone such as `Europe/Berlin` or `America/New_York`.", "Verwende eine IANA-Zeitzone wie `Europe/Berlin` oder `America/New_York`."), true)
 		return
 	}
 	if err := a.setTimezone(context.Background(), i.GuildID, timezone); err != nil {
 		a.fail(i, err)
 		return
 	}
-	a.reply(i, "Event times for this server now use `"+timezone+"`.", true)
+	a.reply(i, text(i, "Event times for this server now use `"+timezone+"`.", "Event-Zeiten für diesen Server verwenden jetzt `"+timezone+"`."), true)
 }
 func (a *app) showCreateChoice(i *discordgo.InteractionCreate) {
-	a.replyWithComponents(i, "Choose who can discover this event:", []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-		discordgo.Button{Label: "Public event", Style: discordgo.PrimaryButton, CustomID: "create:public"},
-		discordgo.Button{Label: "Private event", Style: discordgo.SecondaryButton, CustomID: "create:private"},
+	a.replyWithComponents(i, text(i, "Choose who can discover this event:", "Wähle, wer dieses Event finden kann:"), []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+		discordgo.Button{Label: text(i, "Public event", "Öffentliches Event"), Style: discordgo.PrimaryButton, CustomID: "create:public"},
+		discordgo.Button{Label: text(i, "Private event", "Privates Event"), Style: discordgo.SecondaryButton, CustomID: "create:private"},
 	}}}, true)
 }
 func (a *app) showCreateModal(i *discordgo.InteractionCreate, visibility string) {
-	err := a.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseModal, Data: &discordgo.InteractionResponseData{CustomID: "event-create:" + visibility, Title: "Create pack event", Components: []discordgo.MessageComponent{
-		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "title", Label: "Pack name", Style: discordgo.TextInputShort, Required: true, MaxLength: 100}}},
-		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "when", Label: "When (server timezone)", Style: discordgo.TextInputShort, Placeholder: "tomorrow 8pm, Friday 19:30, or 2026-09-13 20:43", Required: true, MaxLength: 64}}},
-		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "server", Label: "Evrima server", Style: discordgo.TextInputShort, Required: true, MaxLength: 100}}},
-		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "species", Label: "Desired species (optional)", Style: discordgo.TextInputShort, Required: false, MaxLength: 100}}},
+	err := a.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseModal, Data: &discordgo.InteractionResponseData{CustomID: "event-create:" + visibility, Title: text(i, "Create pack event", "Pack-Event erstellen"), Components: []discordgo.MessageComponent{
+		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "title", Label: text(i, "Pack name", "Pack-Name"), Style: discordgo.TextInputShort, Required: true, MaxLength: 100}}},
+		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "when", Label: text(i, "When (server timezone)", "Wann (Server-Zeitzone)"), Style: discordgo.TextInputShort, Placeholder: text(i, "tomorrow 8pm, Friday 19:30, or 2026-09-13 20:43", "morgen 20 Uhr, Freitag 19:30 oder 2026-09-13 20:43"), Required: true, MaxLength: 64}}},
+		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "server", Label: text(i, "Evrima server", "Evrima-Server"), Style: discordgo.TextInputShort, Required: true, MaxLength: 100}}},
+		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "species", Label: text(i, "Desired species (optional)", "Gewünschte Spezies (optional)"), Style: discordgo.TextInputShort, Required: false, MaxLength: 100}}},
 	}}})
 	if err != nil {
 		slog.Error("open event form", "error", err)
@@ -209,6 +209,13 @@ func parseEventTime(value string, location *time.Location) (time.Time, error) {
 		}
 	}
 	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.TrimSpace(strings.TrimSuffix(value, " uhr"))
+	for german, english := range map[string]string{"heute ": "today ", "morgen ": "tomorrow ", "montag ": "monday ", "dienstag ": "tuesday ", "mittwoch ": "wednesday ", "donnerstag ": "thursday ", "freitag ": "friday ", "samstag ": "saturday ", "sonntag ": "sunday "} {
+		if rest, ok := strings.CutPrefix(value, german); ok {
+			value = english + rest
+			break
+		}
+	}
 	now := time.Now().In(location)
 	for prefix, days := range map[string]int{"today ": 0, "tomorrow ": 1} {
 		if clock, ok := strings.CutPrefix(value, prefix); ok {
@@ -239,7 +246,7 @@ func parseEventTime(value string, location *time.Location) (time.Time, error) {
 }
 func parseClock(day time.Time, value string, location *time.Location) (time.Time, error) {
 	value = strings.ToUpper(strings.ReplaceAll(value, " ", ""))
-	for _, layout := range []string{"15:04", "3PM", "3:04PM"} {
+	for _, layout := range []string{"15:04", "15", "3PM", "3:04PM"} {
 		if parsed, err := time.Parse(layout, value); err == nil {
 			return time.Date(day.Year(), day.Month(), day.Day(), parsed.Hour(), parsed.Minute(), 0, 0, location), nil
 		}
