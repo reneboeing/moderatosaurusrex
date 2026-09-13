@@ -21,7 +21,7 @@ environments, set these environment variables directly:
 Invite the bot with the `bot` and `applications.commands` OAuth2 scopes. The
 bot needs no privileged gateway intents for this demo.
 
-## Run locally
+## Local development
 
 Keep PostgreSQL running in Docker, then run the bot from a terminal you keep
 open. The bot stays attached to that terminal: its logs appear there, and
@@ -32,6 +32,18 @@ make run
 ```
 
 Run the test suite with `make test`.
+
+For a managed background process, use the development commands instead. They
+build the binary, keep the process ID in the git-ignored `.dev` directory, and
+write output to `.dev/bot.log`:
+
+```sh
+make dev-up       # build and start
+make dev-logs     # follow logs (Ctrl+C stops only the log view)
+make dev-restart  # rebuild and restart after a code change
+make dev-status
+make dev-down
+```
 
 ## Run with Docker
 
