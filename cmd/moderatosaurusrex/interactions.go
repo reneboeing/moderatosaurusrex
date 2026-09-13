@@ -102,7 +102,7 @@ func (a *app) create(i *discordgo.InteractionCreate, o map[string]string) {
 		a.reply(i, "An administrator must first run `/event configure-channel`.", true)
 		return
 	}
-	when, err := time.Parse(time.RFC3339, o["when"])
+	when, err := parseEventTime(o["when"])
 	if err != nil {
 		a.reply(i, "Use an ISO-8601 time including your UTC offset, for example `2026-09-13T20:00+02:00`.", true)
 		return
@@ -135,6 +135,16 @@ func (a *app) create(i *discordgo.InteractionCreate, o map[string]string) {
 		return
 	}
 	a.reply(i, "Your public event is live in the configured event channel.", true)
+}
+
+func parseEventTime(value string) (time.Time, error) {
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04Z07:00"} {
+		when, err := time.Parse(layout, value)
+		if err == nil {
+			return when, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("invalid event time")
 }
 func eventText(e event) string {
 	species := "Any species"
