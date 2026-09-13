@@ -53,8 +53,10 @@ docker pull ghcr.io/reneboeing/moderatosaurusrex:0.1.0
 ```
 
 Published version tags also receive matching `major.minor`, `major`, and
-`latest` tags. The package can be made public from its package settings on
-GitHub if people should be able to pull it without authenticating.
+`latest` tags. Each tag contains both `linux/amd64` and `linux/arm64` images,
+so Docker and Portainer pull the correct architecture automatically. The package
+can be made public from its package settings on GitHub if people should be able
+to pull it without authenticating.
 
 ## Deploy with Portainer
 
