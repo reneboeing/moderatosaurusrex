@@ -44,9 +44,9 @@ The final image is `scratch`-based and runs as the unprivileged numeric user
 
 ## Published images
 
-GitHub Actions tests every pull request and builds the image for pushes to
-`main`. Pushing a semantic version tag such as `v0.1.0` also publishes it to
-GitHub Container Registry:
+GitHub Actions tests every pull request. Pushes to `main` publish the `latest`
+image to GitHub Container Registry, while a semantic version tag such as
+`v0.1.0` also publishes versioned images:
 
 ```sh
 docker pull ghcr.io/reneboeing/moderatosaurusrex:0.1.0
