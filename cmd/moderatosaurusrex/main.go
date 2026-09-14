@@ -147,11 +147,18 @@ func (a *app) processDueEvents(ctx context.Context) {
 				_ = a.retryReminder(ctx, event.ID)
 				continue
 			}
-			if _, err := a.session.ChannelMessageSend(event.VoiceChannelID, "**"+event.Title+"** starts in 15 minutes. Only session-role members can join this voice channel."); err != nil {
-				slog.Error("announce private session", "session_id", event.ID, "error", err)
-			}
 		}
-		if _, err := a.session.ChannelMessageSend(event.VoiceChannelID, "**"+event.Title+"** starts in 15 minutes."); err != nil {
+		users, err := a.participantIDs(ctx, event.ID)
+		if err != nil {
+			slog.Error("load private session participants", "session_id", event.ID, "error", err)
+			continue
+		}
+		mentions := make([]string, 0, len(users))
+		for _, id := range users {
+			mentions = append(mentions, "<@"+id+">")
+		}
+		message := strings.Join(mentions, " ") + " — **" + event.Title + "** starts in 15 minutes. This private voice channel is ready."
+		if _, err := a.session.ChannelMessageSend(event.VoiceChannelID, message); err != nil {
 			slog.Error("send private session reminder", "session_id", event.ID, "error", err)
 		}
 	}
