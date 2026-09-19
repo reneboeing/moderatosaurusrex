@@ -1,9 +1,43 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/bwmarrin/discordgo"
 )
+
+func TestMemberCanManageRoles(t *testing.T) {
+	roles := []*discordgo.Role{
+		{ID: "guild", Permissions: discordgo.PermissionViewChannel},
+		{ID: "manager", Permissions: discordgo.PermissionManageRoles},
+		{ID: "admin", Permissions: discordgo.PermissionAdministrator},
+	}
+	for _, test := range []struct {
+		name   string
+		member *discordgo.Member
+		want   bool
+	}{
+		{name: "missing member", want: false},
+		{name: "no permission", member: &discordgo.Member{}, want: false},
+		{name: "manage roles", member: &discordgo.Member{Roles: []string{"manager"}}, want: true},
+		{name: "administrator", member: &discordgo.Member{Roles: []string{"admin"}}, want: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := memberCanManageRoles("guild", test.member, roles); got != test.want {
+				t.Fatalf("memberCanManageRoles() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestVoiceChannelDeletionFailureMessageNamesChannel(t *testing.T) {
+	message := voiceChannelDeletionFailureMessage("night-roam")
+	if !strings.Contains(message, "**night-roam**") || !strings.Contains(message, "Manage Channels") {
+		t.Fatalf("deletion-failure message = %q; want channel name and missing permission", message)
+	}
+}
 
 func TestParseEventTime(t *testing.T) {
 	for _, input := range []string{"2026-09-13T20:43+02:00", "2026-09-13T20:43:00+02:00"} {

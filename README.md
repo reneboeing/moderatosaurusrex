@@ -3,8 +3,8 @@
 Moderatosaurus Rex is a Discord bot for Crunch's community. It will help players
 of *The Isle: Evrima* find groups to play with.
 
-This first harness connects to Discord and exposes a `/ping` slash command. It
-answers with `Roar! Moderatosaurus Rex is online.`
+The bot provides `/sessions` slash commands for players to host, find, and
+manage play sessions.
 
 ## Configuration
 
@@ -20,7 +20,8 @@ environments, set these environment variables directly:
 
 Invite the bot with the `bot` and `applications.commands` OAuth2 scopes. The
 bot needs no privileged gateway intents. For public play sessions, grant it
-**Manage Channels** and permission to send messages in voice-channel chat.
+**Manage Channels** and permission to send messages in voice-channel chat. To
+enable private sessions, it also needs **Manage Roles**.
 
 ## Local development
 
@@ -126,8 +127,8 @@ registry credentials.
 
 An administrator runs `/sessions configure-timezone` and `/sessions
 configure-category` once per server. Public session voice channels are created
-inside the configured category. Everyone then uses `/sessions create`, chooses
-public or private, and completes a short form with a session name, start time,
+inside the configured category. Everyone can then use `/sessions create` for a
+public session and complete a short form with a session name, start time,
 optional Evrima server, and optional species.
 Play-session times use the configured server timezone and accept inputs such as
 `tomorrow 8pm`, `Friday 19:30`, and `2026-09-13 20:43`. Public play sessions
@@ -136,7 +137,10 @@ their temporary voice channel and posts its announcement and reminder in that
 voice channel's chat. Slash-command fallbacks are `/sessions join` and
 `/sessions leave`.
 
-Private play sessions are not announced or listed. Their host receives an invite
+Private play sessions are disabled by default. An administrator can enable or
+disable them with `/sessions configure-private enabled:true` (or `false`).
+Enabling is refused unless the bot has **Manage Roles**. Private play sessions
+are not announced or listed. Their host receives an invite
 code in the private creation response, which players use with `/sessions
 join-private`. The
 bot creates a temporary role for the host and participants; 15 minutes before

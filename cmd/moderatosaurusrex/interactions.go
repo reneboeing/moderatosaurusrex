@@ -16,14 +16,13 @@ func registerCommands(s *discordgo.Session, appID, guildID string) error {
 		return err
 	}
 	for _, command := range previous {
-		if command.Name == "lfp" || command.Name == "event" {
+		if command.Name == "ping" || command.Name == "lfp" || command.Name == "event" {
 			if err := s.ApplicationCommandDelete(appID, guildID, command.ID); err != nil {
 				return err
 			}
 		}
 	}
 	commands := []*discordgo.ApplicationCommand{
-		{Name: "ping", Description: "Check whether Moderatosaurus Rex is online."},
 		{Name: "sessions", Description: "Host, find, and manage Evrima play sessions.", Options: []*discordgo.ApplicationCommandOption{
 			{Name: "help", Description: "Learn how to use play sessions.", Type: discordgo.ApplicationCommandOptionSubCommand},
 			{Name: "browse", Description: "Browse public play sessions.", Type: discordgo.ApplicationCommandOptionSubCommand},
@@ -34,6 +33,7 @@ func registerCommands(s *discordgo.Session, appID, guildID string) error {
 			{Name: "end", Description: "End a hosted session; admins may end any session.", Type: 1},
 			{Name: "configure-category", Description: "Set the category for public session voice channels.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "category", Description: "Category for public session voice channels.", Type: 7, ChannelTypes: []discordgo.ChannelType{discordgo.ChannelTypeGuildCategory}, Required: true}}},
 			{Name: "configure-timezone", Description: "Set the server session timezone, e.g. Europe/Berlin.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "timezone", Description: "IANA timezone, e.g. Europe/Berlin.", Type: 3, Required: true}}},
+			{Name: "configure-private", Description: "Enable or disable private play sessions.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "enabled", Description: "Whether private play sessions are enabled.", Type: discordgo.ApplicationCommandOptionBoolean, Required: true}}},
 		}},
 	}
 	for _, c := range commands {
@@ -65,10 +65,6 @@ func userID(i *discordgo.InteractionCreate) string {
 }
 func (a *app) handleCommand(i *discordgo.InteractionCreate) {
 	d := i.ApplicationCommandData()
-	if d.Name == "ping" {
-		a.reply(i, "Roar! Moderatosaurus Rex is online.", true)
-		return
-	}
 	if i.GuildID == "" {
 		a.reply(i, "This command can only be used in a server.", true)
 		return
@@ -90,6 +86,8 @@ func (a *app) handleCommand(i *discordgo.InteractionCreate) {
 		a.configureCategory(i, opts["category"])
 	case "configure-timezone":
 		a.configureTimezone(i, opts["timezone"])
+	case "configure-private":
+		a.configurePrivate(i, opts["enabled"] == "true")
 	case "create":
 		a.showCreateChoice(i)
 	case "join":
@@ -112,12 +110,12 @@ func (a *app) showHelp(i *discordgo.InteractionCreate) {
 			"Use `/sessions browse` to find public roams and join from the list.\n"+
 			"Use `/sessions create` to host a public or private session. Public sessions open a voice channel 15 minutes before they begin. Private hosts receive an invite code in the creation response; players join with `/sessions join-private`.\n"+
 			"Use `/sessions leave` to leave and `/sessions end` to end a session you host. Server administrators can end any session.\n"+
-			"Admins: use `/sessions configure-timezone` and `/sessions configure-category` once per server.",
+			"Admins: use `/sessions configure-timezone` and `/sessions configure-category` once per server; use `/sessions configure-private` to manage private sessions.",
 		"**Moderatosaurus Rex — Spielrunden**\n"+
 			"Mit `/sessions browse` findest du öffentliche Runden und kannst direkt aus der Liste beitreten.\n"+
 			"Mit `/sessions create` erstellst du eine öffentliche oder private Spielrunde. Für öffentliche Runden wird 15 Minuten vorher ein Sprachkanal geöffnet. Hosts privater Runden erhalten den Einladungscode in der Erstellungsantwort; Spieler treten mit `/sessions join-private` bei.\n"+
 			"Mit `/sessions leave` verlässt du eine Runde; mit `/sessions end` beendest du eine von dir gehostete Runde. Server-Administratoren können jede Runde beenden.\n"+
-			"Admins: `/sessions configure-timezone` und `/sessions configure-category` werden pro Server einmal eingerichtet."), true)
+			"Admins: `/sessions configure-timezone` und `/sessions configure-category` werden pro Server einmal eingerichtet; `/sessions configure-private` verwaltet private Spielrunden."), true)
 }
 func (a *app) configureCategory(i *discordgo.InteractionCreate, category string) {
 	if i.Member == nil || i.Member.Permissions&discordgo.PermissionManageServer == 0 {
@@ -150,13 +148,52 @@ func (a *app) configureTimezone(i *discordgo.InteractionCreate, timezone string)
 	}
 	a.reply(i, text(i, "Play-session times for this server now use `"+timezone+"`.", "Zeiten für Spielrunden verwenden jetzt `"+timezone+"`."), true)
 }
+func (a *app) configurePrivate(i *discordgo.InteractionCreate, enabled bool) {
+	if !canManageSessions(i) {
+		a.reply(i, "You need the Manage Server permission to configure private sessions.", true)
+		return
+	}
+	if enabled {
+		canManageRoles, err := a.botCanManageRoles(i.GuildID)
+		if err != nil || !canManageRoles {
+			a.reply(i, "Private sessions cannot be enabled because I need the Manage Roles permission.", true)
+			return
+		}
+	}
+	if err := a.setPrivateSessionsEnabled(context.Background(), i.GuildID, enabled); err != nil {
+		a.fail(i, err)
+		return
+	}
+	if enabled {
+		a.reply(i, "Private play sessions are now enabled.", true)
+		return
+	}
+	a.reply(i, "Private play sessions are now disabled.", true)
+}
 func (a *app) showCreateChoice(i *discordgo.InteractionCreate) {
-	a.replyWithComponents(i, text(i, "Who can discover this play session?", "Wer kann diese Spielrunde finden?"), []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-		discordgo.Button{Label: text(i, "Public session", "Öffentliche Spielrunde"), Style: discordgo.PrimaryButton, CustomID: "create:public"},
-		discordgo.Button{Label: text(i, "Private session", "Private Spielrunde"), Style: discordgo.SecondaryButton, CustomID: "create:private"},
-	}}}, true)
+	enabled, err := a.privateSessionsEnabled(context.Background(), i.GuildID)
+	if err != nil {
+		a.fail(i, err)
+		return
+	}
+	buttons := []discordgo.MessageComponent{discordgo.Button{Label: text(i, "Public session", "Öffentliche Spielrunde"), Style: discordgo.PrimaryButton, CustomID: "create:public"}}
+	if enabled {
+		buttons = append(buttons, discordgo.Button{Label: text(i, "Private session", "Private Spielrunde"), Style: discordgo.SecondaryButton, CustomID: "create:private"})
+	}
+	a.replyWithComponents(i, text(i, "Who can discover this play session?", "Wer kann diese Spielrunde finden?"), []discordgo.MessageComponent{discordgo.ActionsRow{Components: buttons}}, true)
 }
 func (a *app) showCreateModal(i *discordgo.InteractionCreate, visibility string) {
+	if visibility == "private" {
+		enabled, err := a.privateSessionsEnabled(context.Background(), i.GuildID)
+		if err != nil {
+			a.fail(i, err)
+			return
+		}
+		if !enabled {
+			a.reply(i, "Private play sessions are not enabled on this server.", true)
+			return
+		}
+	}
 	err := a.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseModal, Data: &discordgo.InteractionResponseData{CustomID: "session-create:" + visibility, Title: text(i, "Host a play session", "Spielrunde erstellen"), Components: []discordgo.MessageComponent{
 		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "title", Label: text(i, "Session name", "Name der Spielrunde"), Style: discordgo.TextInputShort, Required: true, MaxLength: 100}}},
 		discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "when", Label: text(i, "When (server timezone)", "Wann (Server-Zeitzone)"), Style: discordgo.TextInputShort, Placeholder: text(i, "tomorrow 8pm, Friday 19:30, or 2026-09-13 20:43", "morgen 20 Uhr, Freitag 19:30 oder 2026-09-13 20:43"), Required: true, MaxLength: 64}}},
@@ -190,7 +227,16 @@ func (a *app) handleModal(i *discordgo.InteractionCreate) {
 	a.create(i, modalValues(i), parts[1])
 }
 func (a *app) showPrivateJoinModal(i *discordgo.InteractionCreate) {
-	err := a.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseModal, Data: &discordgo.InteractionResponseData{CustomID: "private-join", Title: text(i, "Join private session", "Privater Spielrunde beitreten"), Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "invite_code", Label: text(i, "Invite code", "Einladungscode"), Placeholder: "REX-1234abcd", Style: discordgo.TextInputShort, Required: true, MaxLength: 32}}}}}})
+	enabled, err := a.privateSessionsEnabled(context.Background(), i.GuildID)
+	if err != nil {
+		a.fail(i, err)
+		return
+	}
+	if !enabled {
+		a.reply(i, "Private play sessions are not enabled on this server.", true)
+		return
+	}
+	err = a.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseModal, Data: &discordgo.InteractionResponseData{CustomID: "private-join", Title: text(i, "Join private session", "Privater Spielrunde beitreten"), Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "invite_code", Label: text(i, "Invite code", "Einladungscode"), Placeholder: "REX-1234abcd", Style: discordgo.TextInputShort, Required: true, MaxLength: 32}}}}}})
 	if err != nil {
 		slog.Error("open private join form", "error", err)
 	}
@@ -200,6 +246,17 @@ func (a *app) create(i *discordgo.InteractionCreate, o map[string]string, visibi
 		return
 	}
 	categoryID := ""
+	if visibility == "private" {
+		enabled, err := a.privateSessionsEnabled(context.Background(), i.GuildID)
+		if err != nil {
+			a.failDeferred(i, err)
+			return
+		}
+		if !enabled {
+			a.editReply(i, "Private play sessions are not enabled on this server.")
+			return
+		}
+	}
 	if visibility == "public" || visibility == "private" {
 		var err error
 		categoryID, err = a.sessionCategory(context.Background(), i.GuildID)
@@ -373,6 +430,15 @@ func (a *app) list(i *discordgo.InteractionCreate) {
 }
 func (a *app) showJoinEvents(i *discordgo.InteractionCreate) { a.list(i) }
 func (a *app) joinPrivate(i *discordgo.InteractionCreate, code string) {
+	enabled, err := a.privateSessionsEnabled(context.Background(), i.GuildID)
+	if err != nil {
+		a.fail(i, err)
+		return
+	}
+	if !enabled {
+		a.reply(i, "Private play sessions are not enabled on this server.", true)
+		return
+	}
 	e, err := a.eventByCode(context.Background(), i.GuildID, code)
 	if err != nil {
 		a.reply(i, "That private invite code is invalid or the session has ended.", true)
@@ -468,14 +534,12 @@ func (a *app) close(i *discordgo.InteractionCreate, id string) {
 	}
 	if e.VoiceChannelID != "" {
 		if _, err := a.session.ChannelDelete(e.VoiceChannelID); err != nil {
-			a.reply(i, "I could not delete this session's voice channel. Please try again after checking my Manage Channels permission.", true)
-			return
+			a.notifyVoiceChannelDeletionFailure(e)
 		}
 	}
 	if e.RoleID != "" {
 		if err := a.session.GuildRoleDelete(e.GuildID, e.RoleID); err != nil {
-			a.reply(i, "I could not delete this session's private role. Please try again after checking my Manage Roles permission.", true)
-			return
+			slog.Error("delete session private role", "session_id", e.ID, "role_id", e.RoleID, "error", err)
 		}
 	}
 	closed, err := a.closeEvent(context.Background(), id)
@@ -515,6 +579,46 @@ func (a *app) showCloseEvents(i *discordgo.InteractionCreate) {
 }
 func canManageSessions(i *discordgo.InteractionCreate) bool {
 	return i.Member != nil && i.Member.Permissions&discordgo.PermissionManageServer != 0
+}
+func (a *app) botCanManageRoles(guildID string) (bool, error) {
+	member, err := a.session.UserGuildMember(guildID)
+	if err != nil {
+		return false, err
+	}
+	roles, err := a.session.GuildRoles(guildID)
+	if err != nil {
+		return false, err
+	}
+	return memberCanManageRoles(guildID, member, roles), nil
+}
+func memberCanManageRoles(guildID string, member *discordgo.Member, roles []*discordgo.Role) bool {
+	if member == nil {
+		return false
+	}
+	roleIDs := map[string]bool{guildID: true}
+	for _, id := range member.Roles {
+		roleIDs[id] = true
+	}
+	var permissions int64
+	for _, role := range roles {
+		if roleIDs[role.ID] {
+			permissions |= role.Permissions
+		}
+	}
+	return permissions&discordgo.PermissionAdministrator != 0 || permissions&discordgo.PermissionManageRoles != 0
+}
+func (a *app) notifyVoiceChannelDeletionFailure(e event) {
+	channelName := voiceChannelName(e.Title)
+	if channel, err := a.session.Channel(e.VoiceChannelID); err == nil && channel.Name != "" {
+		channelName = channel.Name
+	}
+	message := voiceChannelDeletionFailureMessage(channelName)
+	if _, err := a.session.ChannelMessageSend(e.VoiceChannelID, message); err != nil {
+		slog.Error("notify administrators about leftover voice channel", "session_id", e.ID, "voice_channel_id", e.VoiceChannelID, "error", err)
+	}
+}
+func voiceChannelDeletionFailureMessage(channelName string) string {
+	return "Server administrators: I could not delete the leftover voice channel **" + channelName + "** because I am missing the Manage Channels permission. The session was removed from my database; please delete this channel manually."
 }
 func (a *app) handleButton(i *discordgo.InteractionCreate) {
 	if i.MessageComponentData().CustomID == "close-select" {

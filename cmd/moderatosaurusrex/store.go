@@ -20,6 +20,7 @@ func migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	_, err := pool.Exec(ctx, `
 CREATE TABLE IF NOT EXISTS guild_settings (guild_id TEXT PRIMARY KEY, channel_id TEXT NOT NULL);
 ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT 'UTC';
+ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS private_sessions_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY,guild_id TEXT NOT NULL,creator_id TEXT NOT NULL,title TEXT NOT NULL,visibility TEXT NOT NULL CHECK (visibility IN ('public','private')),invite_code TEXT UNIQUE,game_server TEXT NOT NULL,species TEXT NOT NULL DEFAULT '',voice_channel_id TEXT NOT NULL DEFAULT '',starts_at TIMESTAMPTZ NOT NULL,reminder_sent BOOLEAN NOT NULL DEFAULT FALSE,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
 ALTER TABLE events ADD COLUMN IF NOT EXISTS voice_channel_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE events ADD COLUMN IF NOT EXISTS role_id TEXT NOT NULL DEFAULT '';
@@ -44,6 +45,18 @@ func (a *app) setSessionCategory(ctx context.Context, guildID, categoryID string
 func (a *app) setTimezone(ctx context.Context, guildID, timezone string) error {
 	_, err := a.pool.Exec(ctx, `INSERT INTO guild_settings(guild_id,channel_id,timezone) VALUES($1,'',$2) ON CONFLICT(guild_id) DO UPDATE SET timezone=EXCLUDED.timezone`, guildID, timezone)
 	return err
+}
+func (a *app) setPrivateSessionsEnabled(ctx context.Context, guildID string, enabled bool) error {
+	_, err := a.pool.Exec(ctx, `INSERT INTO guild_settings(guild_id,channel_id,private_sessions_enabled) VALUES($1,'',$2) ON CONFLICT(guild_id) DO UPDATE SET private_sessions_enabled=EXCLUDED.private_sessions_enabled`, guildID, enabled)
+	return err
+}
+func (a *app) privateSessionsEnabled(ctx context.Context, guildID string) (bool, error) {
+	var enabled bool
+	err := a.pool.QueryRow(ctx, `SELECT private_sessions_enabled FROM guild_settings WHERE guild_id=$1`, guildID).Scan(&enabled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return enabled, err
 }
 func (a *app) eventTimezone(ctx context.Context, guildID string) (string, error) {
 	var timezone string

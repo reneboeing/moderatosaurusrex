@@ -171,13 +171,12 @@ func (a *app) processDueEvents(ctx context.Context) {
 		if event.VoiceChannelID != "" {
 			if _, err := a.session.ChannelDelete(event.VoiceChannelID); err != nil {
 				slog.Error("delete expired session voice channel", "session_id", event.ID, "error", err)
-				continue
+				a.notifyVoiceChannelDeletionFailure(event)
 			}
 		}
 		if event.RoleID != "" {
 			if err := a.session.GuildRoleDelete(event.GuildID, event.RoleID); err != nil {
 				slog.Error("delete expired private session role", "session_id", event.ID, "error", err)
-				continue
 			}
 		}
 		if err := a.archiveEvent(ctx, event.ID); err != nil {
