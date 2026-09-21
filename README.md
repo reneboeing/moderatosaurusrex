@@ -125,7 +125,12 @@ registry credentials.
 
 ## Play sessions
 
-An administrator runs `/sessions configure-timezone` and `/sessions
+Configuration commands live under `/sessions-admin` and are visible by default only
+to members with Manage Server permission or Administrator. Regular members use
+`/sessions`; its help only includes configuration instructions for those managers.
+Server administrators can override command visibility in Discord’s integration settings.
+
+An administrator runs `/sessions-admin configure-timezone` and `/sessions-admin
 configure-category` once per server. Public session voice channels are created
 inside the configured category. Everyone can then use `/sessions create` for a
 public session and complete a short form with a session name, start time,
@@ -138,7 +143,7 @@ voice channel's chat. Slash-command fallbacks are `/sessions join` and
 `/sessions leave`.
 
 Private play sessions are disabled by default. An administrator can enable or
-disable them with `/sessions configure-private enabled:true` (or `false`).
+disable them with `/sessions-admin configure-private enabled:true` (or `false`).
 Enabling is refused unless the bot has **Manage Roles**. Private play sessions
 are not announced or listed. Their host receives an invite
 code in the private creation response, which players use with `/sessions

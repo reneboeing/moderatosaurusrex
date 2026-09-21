@@ -22,7 +22,18 @@ func registerCommands(s *discordgo.Session, appID, guildID string) error {
 			}
 		}
 	}
-	commands := []*discordgo.ApplicationCommand{
+	for _, c := range sessionCommands() {
+		if _, err := s.ApplicationCommandCreate(appID, guildID, c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sessionCommands() []*discordgo.ApplicationCommand {
+	permissions := int64(discordgo.PermissionManageServer)
+	dmPermission := false
+	return []*discordgo.ApplicationCommand{
 		{Name: "sessions", Description: "Host, find, and manage Evrima play sessions.", Options: []*discordgo.ApplicationCommandOption{
 			{Name: "help", Description: "Learn how to use play sessions.", Type: discordgo.ApplicationCommandOptionSubCommand},
 			{Name: "browse", Description: "Browse public play sessions.", Type: discordgo.ApplicationCommandOptionSubCommand},
@@ -31,17 +42,13 @@ func registerCommands(s *discordgo.Session, appID, guildID string) error {
 			{Name: "join-private", Description: "Enter a private-session invite code.", Type: 1},
 			{Name: "leave", Description: "Choose a play session to leave.", Type: 1},
 			{Name: "end", Description: "End a hosted session; admins may end any session.", Type: 1},
+		}},
+		{Name: "sessions-admin", Description: "Configure play sessions for this server.", DefaultMemberPermissions: &permissions, DMPermission: &dmPermission, Options: []*discordgo.ApplicationCommandOption{
 			{Name: "configure-category", Description: "Set the category for public session voice channels.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "category", Description: "Category for public session voice channels.", Type: 7, ChannelTypes: []discordgo.ChannelType{discordgo.ChannelTypeGuildCategory}, Required: true}}},
 			{Name: "configure-timezone", Description: "Set the server session timezone, e.g. Europe/Berlin.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "timezone", Description: "IANA timezone, e.g. Europe/Berlin.", Type: 3, Required: true}}},
 			{Name: "configure-private", Description: "Enable or disable private play sessions.", Type: 1, Options: []*discordgo.ApplicationCommandOption{{Name: "enabled", Description: "Whether private play sessions are enabled.", Type: discordgo.ApplicationCommandOptionBoolean, Required: true}}},
 		}},
 	}
-	for _, c := range commands {
-		if _, err := s.ApplicationCommandCreate(appID, guildID, c); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (a *app) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -69,7 +76,7 @@ func (a *app) handleCommand(i *discordgo.InteractionCreate) {
 		a.reply(i, "This command can only be used in a server.", true)
 		return
 	}
-	if d.Name != "sessions" || len(d.Options) == 0 {
+	if (d.Name != "sessions" && d.Name != "sessions-admin") || len(d.Options) == 0 {
 		return
 	}
 	sub := d.Options[0]
@@ -77,17 +84,22 @@ func (a *app) handleCommand(i *discordgo.InteractionCreate) {
 	for _, o := range sub.Options {
 		opts[o.Name] = fmt.Sprint(o.Value)
 	}
+	if d.Name == "sessions-admin" {
+		switch sub.Name {
+		case "configure-category":
+			a.configureCategory(i, opts["category"])
+		case "configure-timezone":
+			a.configureTimezone(i, opts["timezone"])
+		case "configure-private":
+			a.configurePrivate(i, opts["enabled"] == "true")
+		}
+		return
+	}
 	switch sub.Name {
 	case "help":
 		a.showHelp(i)
 	case "browse":
 		a.list(i)
-	case "configure-category":
-		a.configureCategory(i, opts["category"])
-	case "configure-timezone":
-		a.configureTimezone(i, opts["timezone"])
-	case "configure-private":
-		a.configurePrivate(i, opts["enabled"] == "true")
 	case "create":
 		a.showCreateChoice(i)
 	case "join":
@@ -105,20 +117,28 @@ func (a *app) handleCommand(i *discordgo.InteractionCreate) {
 	}
 }
 func (a *app) showHelp(i *discordgo.InteractionCreate) {
-	a.reply(i, text(i,
+	a.reply(i, sessionHelp(i), true)
+}
+
+func sessionHelp(i *discordgo.InteractionCreate) string {
+	message := text(i,
 		"**Moderatosaurus Rex — play sessions**\n"+
 			"Use `/sessions browse` to find public roams and join from the list.\n"+
 			"Use `/sessions create` to host a public or private session. Public sessions open a voice channel 15 minutes before they begin. Private hosts receive an invite code in the creation response; players join with `/sessions join-private`.\n"+
-			"Use `/sessions leave` to leave and `/sessions end` to end a session you host. Server administrators can end any session.\n"+
-			"Admins: use `/sessions configure-timezone` and `/sessions configure-category` once per server; use `/sessions configure-private` to manage private sessions.",
+			"Use `/sessions leave` to leave and `/sessions end` to end a session you host. Server administrators can end any session.",
 		"**Moderatosaurus Rex — Spielrunden**\n"+
 			"Mit `/sessions browse` findest du öffentliche Runden und kannst direkt aus der Liste beitreten.\n"+
 			"Mit `/sessions create` erstellst du eine öffentliche oder private Spielrunde. Für öffentliche Runden wird 15 Minuten vorher ein Sprachkanal geöffnet. Hosts privater Runden erhalten den Einladungscode in der Erstellungsantwort; Spieler treten mit `/sessions join-private` bei.\n"+
-			"Mit `/sessions leave` verlässt du eine Runde; mit `/sessions end` beendest du eine von dir gehostete Runde. Server-Administratoren können jede Runde beenden.\n"+
-			"Admins: `/sessions configure-timezone` und `/sessions configure-category` werden pro Server einmal eingerichtet; `/sessions configure-private` verwaltet private Spielrunden."), true)
+			"Mit `/sessions leave` verlässt du eine Runde; mit `/sessions end` beendest du eine von dir gehostete Runde. Server-Administratoren können jede Runde beenden.")
+	if canManageSessions(i) {
+		message += "\n" + text(i,
+			"Admins: use `/sessions-admin configure-timezone` and `/sessions-admin configure-category` once per server; use `/sessions-admin configure-private` to manage private sessions.",
+			"Admins: `/sessions-admin configure-timezone` und `/sessions-admin configure-category` werden pro Server einmal eingerichtet; `/sessions-admin configure-private` verwaltet private Spielrunden.")
+	}
+	return message
 }
 func (a *app) configureCategory(i *discordgo.InteractionCreate, category string) {
-	if i.Member == nil || i.Member.Permissions&discordgo.PermissionManageServer == 0 {
+	if !canManageSessions(i) {
 		a.reply(i, "You need the Manage Server permission to configure the session category.", true)
 		return
 	}
@@ -134,7 +154,7 @@ func (a *app) configureCategory(i *discordgo.InteractionCreate, category string)
 	a.reply(i, text(i, "Public session voice channels will be created in <#"+category+">.", "Öffentliche Sprachkanäle für Spielrunden werden in <#"+category+"> erstellt."), true)
 }
 func (a *app) configureTimezone(i *discordgo.InteractionCreate, timezone string) {
-	if i.Member == nil || i.Member.Permissions&discordgo.PermissionManageServer == 0 {
+	if !canManageSessions(i) {
 		a.reply(i, text(i, "You need the Manage Server permission to configure the session timezone.", "Du benötigst die Berechtigung „Server verwalten“, um die Zeitzone für Spielrunden einzurichten."), true)
 		return
 	}
@@ -261,13 +281,13 @@ func (a *app) create(i *discordgo.InteractionCreate, o map[string]string, visibi
 		var err error
 		categoryID, err = a.sessionCategory(context.Background(), i.GuildID)
 		if err != nil || categoryID == "" {
-			a.editReply(i, "An administrator must first run `/sessions configure-category`.")
+			a.editReply(i, "Ask a server administrator to configure the session category first.")
 			return
 		}
 	}
 	timezone, err := a.eventTimezone(context.Background(), i.GuildID)
 	if err != nil {
-		a.editReply(i, "An administrator must first run `/sessions configure-timezone`.")
+		a.editReply(i, "Ask a server administrator to configure the session timezone first.")
 		return
 	}
 	location, err := time.LoadLocation(timezone)
@@ -578,7 +598,7 @@ func (a *app) showCloseEvents(i *discordgo.InteractionCreate) {
 	a.replyWithComponents(i, text(i, "Choose a play session to end:", "Wähle eine Spielrunde zum Beenden:"), []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.SelectMenu{CustomID: "close-select", Placeholder: text(i, "Select a play session", "Spielrunde auswählen"), Options: options, MaxValues: 1}}}}, true)
 }
 func canManageSessions(i *discordgo.InteractionCreate) bool {
-	return i.Member != nil && i.Member.Permissions&discordgo.PermissionManageServer != 0
+	return i.Member != nil && i.Member.Permissions&(discordgo.PermissionManageServer|discordgo.PermissionAdministrator) != 0
 }
 func (a *app) botCanManageRoles(guildID string) (bool, error) {
 	member, err := a.session.UserGuildMember(guildID)
